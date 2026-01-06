@@ -1,0 +1,63 @@
+[package]
+name = "drover"
+version = "0.1.0"
+edition = "2021"
+description = "Drive your project to completion with parallel AI agents"
+license = "MIT"
+repository = "https://github.com/cloud-shuttle/drover"
+keywords = ["ai", "agents", "orchestration", "beads", "claude"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full", "process", "sync", "time", "io-util"] }
+
+# Database (for durable execution)
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite", "json", "chrono", "uuid"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging/tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+regex = "1.11"
+
+# TUI dashboard
+ratatui = "0.29"
+crossterm = "0.28"
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.14"
+assert_cmd = "2.0"
+predicates = "3.1"
+
+[features]
+default = ["postgres"]
+postgres = []
+sqlite = []
+dashboard = []
+
+[[bin]]
+name = "drover"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

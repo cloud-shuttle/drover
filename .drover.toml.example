@@ -1,0 +1,28 @@
+# Drover Configuration Example
+# Copy this file to .drover.toml and customize as needed
+
+# Number of parallel workers
+workers = 4
+
+# Task timeout in seconds
+timeout = 600
+
+# Max retry attempts per task
+retries = 3
+
+# Auto-create tasks to fix blockers
+auto_unblock = true
+
+# Database for durable state (sqlite or postgres)
+# SQLite: sqlite://path/to/db.db
+# Postgres: postgres://user:pass@host/db
+database = "sqlite://.drover.db"
+
+# Stall threshold in seconds (no progress for this long triggers a warning)
+stall_threshold = 300
+
+# Poll interval in milliseconds (how often to check for task completion)
+poll_interval = 5000
+
+# Git worktree directory (for parallel task execution)
+# worktree_dir = ".drover/worktrees"
