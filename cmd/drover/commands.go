@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
+	"github.com/cloud-shuttle/drover/internal/config"
 	"github.com/cloud-shuttle/drover/internal/db"
+	"github.com/cloud-shuttle/drover/internal/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -62,31 +67,44 @@ func runCmd() *cobra.Command {
 Tasks are executed respecting dependencies and priorities. Use --workers
 to control parallelism. Use --epic to filter execution to a specific epic.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, store, err := requireProject()
+			projectDir, store, err := requireProject()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			// TODO: Implement DBOS workflow orchestration
-			fmt.Printf("🐂 Starting run with %d workers\n", workers)
-			if epicID != "" {
-				fmt.Printf("Epic filter: %s\n", epicID)
+			// Override config if workers flag specified
+			runCfg := *cfg
+			if workers > 0 {
+				runCfg.Workers = workers
 			}
 
-			// For now, just show status
-			status, err := store.GetProjectStatus()
+			// Create orchestrator
+			orch, err := workflow.NewOrchestrator(&runCfg, store, projectDir)
 			if err != nil {
-				return err
+				return fmt.Errorf("creating orchestrator: %w", err)
 			}
 
-			printStatus(status)
-			return nil
+			// Setup context with cancellation
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			// Handle interrupt signals
+			sigCh := make(chan os.Signal, 1)
+			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+			go func() {
+				<-sigCh
+				fmt.Println("\n🛑 Interrupt received, stopping gracefully...")
+				cancel()
+			}()
+
+			// Run the orchestrator
+			return orch.Run(ctx)
 		},
 	}
 
-	cmd.Flags().IntVarP(&workers, "workers", "w", 4, "Number of parallel workers")
-	cmd.Flags().StringVar(&epicID, "epic", "", "Filter to specific epic")
+	cmd.Flags().IntVarP(&workers, "workers", "w", 0, "Number of parallel workers")
+	cmd.Flags().StringVar(&epicID, "epic", "", "Filter to specific epic (not yet implemented)")
 
 	return cmd
 }
