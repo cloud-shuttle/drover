@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/cloud-shuttle/drover/internal/config"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/workflow"
 	"github.com/spf13/cobra"
@@ -117,7 +116,7 @@ func addCmd() *cobra.Command {
 		blockedBy []string
 	)
 
-	return &cobra.Command{
+	command := &cobra.Command{
 		Use:   "add <title>",
 		Short: "Add a new task",
 		Args:  cobra.ExactArgs(1),
@@ -138,10 +137,11 @@ func addCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&desc, "description", "d", "", "Task description")
-	cmd.Flags().StringVarP(&epicID, "epic", "e", "", "Assign to epic")
-	cmd.Flags().IntVarP(&priority, "priority", "p", 0, "Task priority (higher = more urgent)")
-	cmd.Flags().StringSliceVar(&blockedBy, "blocked-by", nil, "Task IDs this depends on")
+	command.Flags().StringVarP(&desc, "description", "d", "", "Task description")
+	command.Flags().StringVarP(&epicID, "epic", "e", "", "Assign to epic")
+	command.Flags().IntVarP(&priority, "priority", "p", 0, "Task priority (higher = more urgent)")
+	command.Flags().StringSliceVar(&blockedBy, "blocked-by", nil, "Task IDs this depends on")
+	return command
 }
 
 func epicCmd() *cobra.Command {
@@ -170,19 +170,21 @@ func epicCmd() *cobra.Command {
 
 	epicAdd.Flags().StringP("description", "d", "", "Epic description")
 
-	return &cobra.Command{
+	command := &cobra.Command{
 		Use:   "epic",
 		Short: "Manage epics",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
+	command.AddCommand(epicAdd)
+	return command
 }
 
 func statusCmd() *cobra.Command {
 	var watchMode bool
 
-	return &cobra.Command{
+	command := &cobra.Command{
 		Use:   "status",
 		Short: "Show current project status",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -208,7 +210,8 @@ func statusCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVarP(&watchMode, "watch", "w", false, "Watch mode - live updates")
+	command.Flags().BoolVarP(&watchMode, "watch", "w", false, "Watch mode - live updates")
+	return command
 }
 
 func resumeCmd() *cobra.Command {

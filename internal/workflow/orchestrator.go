@@ -187,27 +187,27 @@ func (o *Orchestrator) executeTask(workerID int, job *workerJob) {
 	// Create worktree
 	worktreePath, err := o.git.Create(task)
 	if err != nil {
-		o.handleTaskFailure(job, fmt.Errorf("creating worktree: %w", err))
+		o.handleTaskFailureWithMergeConflict(job, fmt.Errorf("creating worktree: %w", err), false)
 		return
 	}
 	defer o.git.Remove(task.ID)
 
 	// Execute Claude Code
 	if err := o.executor.ExecuteWithTimeout(worktreePath, task); err != nil {
-		o.handleTaskFailure(job, fmt.Errorf("claude execution: %w", err))
+		o.handleTaskFailureWithMergeConflict(job, fmt.Errorf("claude execution: %w", err), false)
 		return
 	}
 
 	// Commit changes
 	commitMsg := fmt.Sprintf("drover: %s\n\nTask: %s", task.ID, task.Title)
 	if err := o.git.Commit(task.ID, commitMsg); err != nil {
-		o.handleTaskFailure(job, fmt.Errorf("committing: %w", err))
+		o.handleTaskFailureWithMergeConflict(job, fmt.Errorf("committing: %w", err), false)
 		return
 	}
 
 	// Merge to main
 	if err := o.git.MergeToMain(task.ID); err != nil {
-		o.handleTaskFailure(job, fmt.Errorf("merging: %w", err), true)
+		o.handleTaskFailureWithMergeConflict(job, fmt.Errorf("merging: %w", err), true)
 		return
 	}
 
@@ -226,13 +226,8 @@ func (o *Orchestrator) executeTask(workerID int, job *workerJob) {
 	}
 }
 
-// handleTaskFailure handles task execution failures
-func (o *Orchestrator) handleTaskFailure(job *workerJob, err error) {
-	o.handleTaskFailure(job, err, false)
-}
-
-// handleTaskFailure handles task execution failures
-func (o *Orchestrator) handleTaskFailure(job *workerJob, err error, mergeConflict bool) {
+// handleTaskFailureWithMergeConflict handles task execution failures
+func (o *Orchestrator) handleTaskFailureWithMergeConflict(job *workerJob, err error, mergeConflict bool) {
 	task := job.Task
 
 	log.Printf("❌ Task %s failed: %v", task.ID, err)
