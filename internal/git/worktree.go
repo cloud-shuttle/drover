@@ -49,13 +49,7 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 
 	// Clean up any existing worktree at this path first
 	// This handles stale worktrees from interrupted runs
-	if _, err := os.Stat(worktreePath); err == nil {
-		// Directory exists, try to remove it
-		wm.Remove(task.ID)
-	}
-
-	// Also prune any stale git worktree registrations
-	wm.PruneStale(task.ID)
+	wm.cleanUpWorktree(task.ID)
 
 	// Create the worktree
 	cmd := exec.Command("git", "worktree", "add", worktreePath)
@@ -68,20 +62,39 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 	return worktreePath, nil
 }
 
+// cleanUpWorktree removes any existing worktree registration and directory for a task
+func (wm *WorktreeManager) cleanUpWorktree(taskID string) {
+	worktreePath := filepath.Join(wm.worktreeDir, taskID)
+
+	// Step 1: Try to remove the worktree via git (handles registered worktrees)
+	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run() // Ignore errors
+
+	// Step 2: If directory still exists, remove it manually (handles unregistered directories)
+	if _, err := os.Stat(worktreePath); err == nil {
+		_ = os.RemoveAll(worktreePath)
+	}
+
+	// Step 3: Prune all stale worktree registrations globally
+	cmd = exec.Command("git", "worktree", "prune")
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run() // Ignore errors
+}
+
 // PruneStale removes stale git worktree registrations for a specific task
 func (wm *WorktreeManager) PruneStale(taskID string) {
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
 
-	// Try to prune stale worktree registrations
-	// Use git worktree prune to clean up stale registrations
-	cmd := exec.Command("git", "worktree", "prune", "--worktrees", worktreePath)
-	cmd.Dir = wm.baseDir
-	_ = cmd.Run() // Ignore errors, this is best-effort cleanup
-
-	// Also try force remove if the worktree is registered but missing
-	cmd = exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	// First, try force remove if the worktree is registered but directory is missing
+	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
 	cmd.Dir = wm.baseDir
 	_ = cmd.Run() // Ignore errors
+
+	// Then prune all stale worktree registrations (globally, not per-worktree)
+	cmd = exec.Command("git", "worktree", "prune")
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run() // Ignore errors, this is best-effort cleanup
 }
 
 // Remove removes a worktree
