@@ -57,6 +57,7 @@ func initCmd() *cobra.Command {
 func runCmd() *cobra.Command {
 	var workers int
 	var epicID string
+	var verbose bool
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -77,6 +78,7 @@ to control parallelism. Use --epic to filter execution to a specific epic.`,
 			if workers > 0 {
 				runCfg.Workers = workers
 			}
+			runCfg.Verbose = verbose
 
 			// Create orchestrator
 			orch, err := workflow.NewOrchestrator(&runCfg, store, projectDir)
@@ -88,13 +90,15 @@ to control parallelism. Use --epic to filter execution to a specific epic.`,
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// Handle interrupt signals
+			// Handle interrupt signals - only process the first one
 			sigCh := make(chan os.Signal, 1)
 			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 			go func() {
 				<-sigCh
 				fmt.Println("\n🛑 Interrupt received, stopping gracefully...")
 				cancel()
+				// Stop listening for signals after first interrupt
+				signal.Stop(sigCh)
 			}()
 
 			// Run the orchestrator
@@ -104,6 +108,7 @@ to control parallelism. Use --epic to filter execution to a specific epic.`,
 
 	cmd.Flags().IntVarP(&workers, "workers", "w", 0, "Number of parallel workers")
 	cmd.Flags().StringVar(&epicID, "epic", "", "Filter to specific epic (not yet implemented)")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging for debugging")
 
 	return cmd
 }

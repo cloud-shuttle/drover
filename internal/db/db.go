@@ -149,11 +149,15 @@ func (s *Store) CreateTask(title, description, epicID string, priority int, bloc
 	}
 	defer tx.Rollback()
 
-	// Insert task
+	// Insert task (convert empty epic_id to NULL for foreign key constraint)
+	var epicIDValue interface{} = task.EpicID
+	if epicIDValue == "" {
+		epicIDValue = nil
+	}
 	_, err = tx.Exec(`
 		INSERT INTO tasks (id, title, description, epic_id, priority, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.Title, task.Description, task.EpicID, task.Priority, task.Status, task.CreatedAt, task.UpdatedAt)
+	`, task.ID, task.Title, task.Description, epicIDValue, task.Priority, task.Status, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating task: %w", err)
 	}
@@ -234,7 +238,6 @@ func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
 		WHERE status = 'ready'
 		ORDER BY priority DESC, created_at ASC
 		LIMIT 1
-		FOR UPDATE SKIP LOCKED
 	`).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
 		&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
 		&task.CreatedAt, &task.UpdatedAt)
@@ -246,15 +249,25 @@ func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
 		return nil, fmt.Errorf("querying task: %w", err)
 	}
 
-	// Claim the task
+	// Claim the task (with race condition check)
 	now := time.Now().Unix()
-	_, err = tx.Exec(`
+	result, err := tx.Exec(`
 		UPDATE tasks
 		SET status = 'claimed', claimed_by = ?, claimed_at = ?, updated_at = ?
-		WHERE id = ?
+		WHERE id = ? AND status = 'ready'
 	`, workerID, now, now, task.ID)
 	if err != nil {
 		return nil, fmt.Errorf("claiming task: %w", err)
+	}
+
+	// Check if the task was still available when we tried to claim it
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("checking affected rows: %w", err)
+	}
+	if rowsAffected == 0 {
+		// Task was claimed by another worker between SELECT and UPDATE
+		return nil, nil
 	}
 
 	task.Status = types.TaskStatusClaimed
@@ -268,6 +281,18 @@ func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
 	return &task, nil
 }
 
+// GetTaskStatus returns the current status of a task
+func (s *Store) GetTaskStatus(taskID string) (types.TaskStatus, error) {
+	var status string
+	err := s.db.QueryRow(`
+		SELECT status FROM tasks WHERE id = ?
+	`, taskID).Scan(&status)
+	if err != nil {
+		return "", err
+	}
+	return types.TaskStatus(status), nil
+}
+
 // UpdateTaskStatus updates a task's status
 func (s *Store) UpdateTaskStatus(taskID string, status types.TaskStatus, lastError string) error {
 	now := time.Now().Unix()
@@ -277,6 +302,56 @@ func (s *Store) UpdateTaskStatus(taskID string, status types.TaskStatus, lastErr
 		WHERE id = ?
 	`, status, lastError, now, taskID)
 	return err
+}
+
+// IncrementTaskAttempts increments the attempt counter for a task
+func (s *Store) IncrementTaskAttempts(taskID string) error {
+	now := time.Now().Unix()
+	_, err := s.db.Exec(`
+		UPDATE tasks
+		SET attempts = attempts + 1, updated_at = ?
+		WHERE id = ?
+	`, now, taskID)
+	return err
+}
+
+// GetTask retrieves a task by ID
+func (s *Store) GetTask(taskID string) (*types.Task, error) {
+	var task types.Task
+	var claimedBy sql.NullString
+	var claimedAt sql.NullInt64
+	var epicID sql.NullString
+	var description sql.NullString
+
+	err := s.db.QueryRow(`
+		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+		       priority, status, attempts, max_attempts,
+		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
+		       created_at, updated_at
+		FROM tasks
+		WHERE id = ?
+	`, taskID).Scan(
+		&task.ID, &task.Title, &description, &epicID,
+		&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
+		&claimedBy, &claimedAt,
+		&task.CreatedAt, &task.UpdatedAt,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	task.Description = description.String
+	task.EpicID = epicID.String
+	if claimedBy.Valid {
+		task.ClaimedBy = claimedBy.String
+	}
+	if claimedAt.Valid {
+		unix := claimedAt.Int64
+		task.ClaimedAt = &unix
+	}
+
+	return &task, nil
 }
 
 // CompleteTask marks a task as completed and unblocks dependents

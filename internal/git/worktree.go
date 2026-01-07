@@ -3,6 +3,7 @@ package git
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +14,9 @@ import (
 
 // WorktreeManager creates and manages git worktrees
 type WorktreeManager struct {
-	baseDir    string // Base repository directory
+	baseDir     string // Base repository directory
 	worktreeDir string // Where worktrees are created (.drover/worktrees)
+	verbose     bool   // Enable verbose logging
 }
 
 // NewWorktreeManager creates a new worktree manager
@@ -22,7 +24,13 @@ func NewWorktreeManager(baseDir, worktreeDir string) *WorktreeManager {
 	return &WorktreeManager{
 		baseDir:     baseDir,
 		worktreeDir: worktreeDir,
+		verbose:     false,
 	}
+}
+
+// SetVerbose enables or disables verbose logging
+func (wm *WorktreeManager) SetVerbose(v bool) {
+	wm.verbose = v
 }
 
 // Create creates a new worktree for a task
@@ -54,6 +62,13 @@ func (wm *WorktreeManager) Remove(taskID string) error {
 	cmd.Dir = wm.baseDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// If worktree doesn't exist, that's okay
+		outputStr := string(output)
+		if strings.Contains(outputStr, "Not a worktree") ||
+			strings.Contains(outputStr, "no such file or directory") ||
+			strings.Contains(outputStr, "is not a working tree") {
+			return nil
+		}
 		return fmt.Errorf("removing worktree: %w\n%s", err, output)
 	}
 
@@ -64,8 +79,36 @@ func (wm *WorktreeManager) Remove(taskID string) error {
 func (wm *WorktreeManager) Commit(taskID, message string) error {
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
 
+	// Check if there are any changes to commit
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = worktreePath
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("checking status: %w", err)
+	}
+
+	// If no changes, return success without committing
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		if wm.verbose {
+			log.Printf("📭 No changes detected in worktree %s", taskID)
+		}
+		return nil // Nothing to commit
+	}
+
+	// Log what files changed (verbose only)
+	if wm.verbose {
+		lines := strings.Split(trimmed, "\n")
+		log.Printf("📝 Changes detected in %d files for task %s:", len(lines), taskID)
+		for _, line := range lines {
+			if line != "" {
+				log.Printf("   %s", line)
+			}
+		}
+	}
+
 	// Stage all changes
-	cmd := exec.Command("git", "add", "-A")
+	cmd = exec.Command("git", "add", "-A")
 	cmd.Dir = worktreePath
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("staging changes: %w\n%s", err, output)
@@ -75,7 +118,20 @@ func (wm *WorktreeManager) Commit(taskID, message string) error {
 	cmd = exec.Command("git", "commit", "-m", message)
 	cmd.Dir = worktreePath
 	if output, err := cmd.CombinedOutput(); err != nil {
+		// If git commit says "nothing to commit", treat it as success
+		// This can happen if the working tree changes between the check and the commit
+		outputStr := string(output)
+		if strings.Contains(outputStr, "nothing to commit") {
+			if wm.verbose {
+				log.Printf("📭 No changes to commit (working tree clean)")
+			}
+			return nil // No problem, just no changes to commit
+		}
 		return fmt.Errorf("committing: %w\n%s", err, output)
+	}
+
+	if wm.verbose {
+		log.Printf("✅ Committed changes for task %s", taskID)
 	}
 
 	return nil
@@ -86,8 +142,23 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
 	branchName := fmt.Sprintf("drover-%s", taskID)
 
+	// Check if worktree has any commits ahead of main
+	// Run this from the base directory to ensure we have the main branch reference
+	cmd := exec.Command("git", "rev-list", "main.."+branchName, "--count")
+	cmd.Dir = wm.baseDir
+	output, err := cmd.Output()
+	if err != nil {
+		// Branch doesn't exist yet, we'll create it and check if there's anything to merge
+		output = []byte("1") // Assume there's something to merge
+	}
+
+	// If the count is 0, no commits to merge
+	if strings.TrimSpace(string(output)) == "0" {
+		return nil
+	}
+
 	// Create a branch from the worktree
-	cmd := exec.Command("git", "checkout", "-b", branchName)
+	cmd = exec.Command("git", "checkout", "-b", branchName)
 	cmd.Dir = worktreePath
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("creating branch: %w\n%s", err, output)

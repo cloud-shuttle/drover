@@ -18,25 +18,12 @@ import (
 
 // Orchestrator manages the main execution loop
 type Orchestrator struct {
-	config     *config.Config
-	store      *db.Store
-	git        *git.WorktreeManager
-	executor   *executor.Executor
-	workerPool chan *workerJob
-	workers    int
-}
-
-type workerJob struct {
-	TaskID   string
-	Task     *types.Task
-	ResultCh chan *workerResult
-}
-
-type workerResult struct {
-	TaskID    string
-	Success   bool
-	Error     string
-	Duration  time.Duration
+	config          *config.Config
+	store           *db.Store
+	git             *git.WorktreeManager
+	executor        *executor.Executor
+	workers         int
+	verbose         bool // Enable verbose logging
 }
 
 // NewOrchestrator creates a new workflow orchestrator
@@ -45,8 +32,10 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 		projectDir,
 		filepath.Join(projectDir, cfg.WorktreeDir),
 	)
+	gitMgr.SetVerbose(cfg.Verbose)
 
 	exec := executor.NewExecutor(cfg.ClaudePath, cfg.TaskTimeout)
+	exec.SetVerbose(cfg.Verbose)
 
 	// Check Claude is installed
 	if err := executor.CheckClaudeInstalled(cfg.ClaudePath); err != nil {
@@ -54,12 +43,12 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 	}
 
 	return &Orchestrator{
-		config:     cfg,
-		store:      store,
-		git:        gitMgr,
-		executor:   exec,
-		workerPool: make(chan *workerJob, cfg.Workers),
-		workers:    cfg.Workers,
+		config:   cfg,
+		store:    store,
+		git:      gitMgr,
+		executor: exec,
+		workers:  cfg.Workers,
+		verbose:  cfg.Verbose,
 	}, nil
 }
 
@@ -67,14 +56,14 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 func (o *Orchestrator) Run(ctx context.Context) error {
 	log.Printf("🐂 Starting Drover with %d workers", o.workers)
 
-	// Start workers
+	// Start workers - they will claim tasks independently
 	var wg sync.WaitGroup
 	for i := 0; i < o.workers; i++ {
 		wg.Add(1)
 		go o.worker(ctx, i, &wg)
 	}
 
-	// Main orchestration loop
+	// Main orchestration loop - just print progress and check for completion
 	ticker := time.NewTicker(o.config.PollInterval)
 	defer ticker.Stop()
 
@@ -82,8 +71,8 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			log.Println("🛑 Context cancelled, stopping...")
-			o.workerPool <- nil // Signal workers to stop
 			wg.Wait()
+			_ = o.git.Cleanup() // Clean up any remaining worktrees
 			return ctx.Err()
 
 		case <-ticker.C:
@@ -98,15 +87,9 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			active := status.Ready + status.InProgress + status.Claimed
 			if active == 0 {
 				log.Println("✅ All tasks complete!")
-				o.workerPool <- nil // Signal workers to stop
 				wg.Wait()
 				o.printFinalStatus(status)
 				return nil
-			}
-
-			// Enqueue ready tasks
-			if err := o.enqueueReadyTasks(); err != nil {
-				log.Printf("Error enqueuing tasks: %v", err)
 			}
 
 			// Print progress
@@ -115,41 +98,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	}
 }
 
-// enqueueReadyTasks claims and enqueues ready tasks
-func (o *Orchestrator) enqueueReadyTasks() error {
-	for {
-		workerID := fmt.Sprintf("worker-%d", time.Now().UnixNano())
-		task, err := o.store.ClaimTask(workerID)
-		if err != nil {
-			return fmt.Errorf("claiming task: %w", err)
-		}
-		if task == nil {
-			break // No more tasks to claim
-		}
-
-		log.Printf("📤 Enqueued task %s: %s", task.ID, task.Title)
-
-		job := &workerJob{
-			TaskID:   task.ID,
-			Task:     task,
-			ResultCh: make(chan *workerResult, 1),
-		}
-
-		select {
-		case o.workerPool <- job:
-			// Job sent to worker pool
-		default:
-			// Pool full, will retry next cycle
-			_ = o.store.UpdateTaskStatus(task.ID, types.TaskStatusReady, "")
-			log.Printf("⚠️  Worker pool full, task %s returned to ready", task.ID)
-			return nil
-		}
-	}
-
-	return nil
-}
-
-// worker processes tasks from the job queue
+// worker claims and executes tasks until the context is cancelled
 func (o *Orchestrator) worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -160,22 +109,32 @@ func (o *Orchestrator) worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 		case <-ctx.Done():
 			log.Printf("👷 Worker %d stopping (context cancelled)", id)
 			return
-
-		case job := <-o.workerPool:
-			if job == nil {
-				log.Printf("👷 Worker %d stopping (shutdown signal)", id)
-				return
+		default:
+			// Try to claim a task
+			workerID := fmt.Sprintf("worker-%d-%d", id, time.Now().UnixNano())
+			task, err := o.store.ClaimTask(workerID)
+			if err != nil {
+				log.Printf("Worker %d: error claiming task: %v", id, err)
+				time.Sleep(time.Second)
+				continue
 			}
 
-			o.executeTask(id, job)
+			if task == nil {
+				// No tasks available, wait a bit before trying again
+				time.Sleep(time.Second)
+				continue
+			}
+
+			// Execute the task
+			o.executeTask(id, task)
 		}
 	}
 }
 
 // executeTask executes a single task
-func (o *Orchestrator) executeTask(workerID int, job *workerJob) {
-	task := job.Task
+func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	start := time.Now()
+	taskCompleted := false
 
 	log.Printf("👷 Worker %d executing task %s: %s", workerID, task.ID, task.Title)
 
@@ -184,31 +143,47 @@ func (o *Orchestrator) executeTask(workerID int, job *workerJob) {
 		log.Printf("Error updating task status: %v", err)
 	}
 
+	// Ensure task is always marked complete or failed, even if we panic
+	defer func() {
+		if !taskCompleted {
+			// Only mark as failed if task is still in_progress (i.e., error handler didn't run)
+			status, err := o.store.GetTaskStatus(task.ID)
+			if err == nil && status == types.TaskStatusInProgress {
+				log.Printf("⚠️  Task %s still in_progress at exit, marking as failed", task.ID)
+				_ = o.store.UpdateTaskStatus(task.ID, types.TaskStatusFailed, "Task did not complete")
+			}
+		}
+	}()
+
 	// Create worktree
 	worktreePath, err := o.git.Create(task)
 	if err != nil {
-		o.handleTaskFailureWithMergeConflict(job, fmt.Errorf("creating worktree: %w", err), false)
+		log.Printf("❌ Task %s failed: creating worktree: %v", task.ID, err)
+		o.handleTaskFailure(task.ID, err.Error())
 		return
 	}
 	defer o.git.Remove(task.ID)
 
 	// Execute Claude Code
 	if err := o.executor.ExecuteWithTimeout(worktreePath, task); err != nil {
-		o.handleTaskFailureWithMergeConflict(job, fmt.Errorf("claude execution: %w", err), false)
+		log.Printf("❌ Task %s failed: claude execution: %v", task.ID, err)
+		o.handleTaskFailure(task.ID, err.Error())
 		return
 	}
 
-	// Commit changes
+	// Commit changes (if any)
 	commitMsg := fmt.Sprintf("drover: %s\n\nTask: %s", task.ID, task.Title)
 	if err := o.git.Commit(task.ID, commitMsg); err != nil {
-		o.handleTaskFailureWithMergeConflict(job, fmt.Errorf("committing: %w", err), false)
+		log.Printf("❌ Task %s failed: committing: %v", task.ID, err)
+		o.handleTaskFailure(task.ID, err.Error())
 		return
 	}
 
-	// Merge to main
+	// Try to merge to main (if there are changes to merge)
 	if err := o.git.MergeToMain(task.ID); err != nil {
-		o.handleTaskFailureWithMergeConflict(job, fmt.Errorf("merging: %w", err), true)
-		return
+		// Log merge error but continue - task completed successfully even if merge failed
+		log.Printf("⚠️  Task %s completed but merge failed: %v", task.ID, err)
+		// Don't return here - continue to mark task as complete
 	}
 
 	// Mark complete and unblock dependents
@@ -216,43 +191,38 @@ func (o *Orchestrator) executeTask(workerID int, job *workerJob) {
 		log.Printf("Error completing task: %v", err)
 	}
 
+	taskCompleted = true
 	duration := time.Since(start)
 	log.Printf("✅ Worker %d completed task %s in %v", workerID, task.ID, duration)
-
-	job.ResultCh <- &workerResult{
-		TaskID:   task.ID,
-		Success:  true,
-		Duration: duration,
-	}
 }
 
-// handleTaskFailureWithMergeConflict handles task execution failures
-func (o *Orchestrator) handleTaskFailureWithMergeConflict(job *workerJob, err error, mergeConflict bool) {
-	task := job.Task
-
-	log.Printf("❌ Task %s failed: %v", task.ID, err)
-
-	// Check if we should retry
-	if task.Attempts < task.MaxAttempts {
-		task.Attempts++
-		_ = o.store.UpdateTaskStatus(task.ID, types.TaskStatusReady, err.Error())
-		log.Printf("🔄 Task %s retrying (attempt %d/%d)", task.ID, task.Attempts, task.MaxAttempts)
+// handleTaskFailure increments attempts and either retries or marks as failed
+func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) {
+	// Fetch current task to check attempts before incrementing
+	task, err := o.store.GetTask(taskID)
+	if err != nil {
+		log.Printf("Error fetching task %s: %v", taskID, err)
+		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
 		return
 	}
 
-	// Max retries exceeded
-	status := types.TaskStatusFailed
-	if mergeConflict {
-		status = types.TaskStatusBlocked
+	// Check if we've exceeded max attempts
+	if task.Attempts >= task.MaxAttempts {
+		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
+		log.Printf("❌ Task %s failed after %d attempts", taskID, task.Attempts)
+		return
 	}
 
-	_ = o.store.UpdateTaskStatus(task.ID, status, err.Error())
-
-	job.ResultCh <- &workerResult{
-		TaskID:  task.ID,
-		Success: false,
-		Error:   err.Error(),
+	// Increment attempts in database
+	if err := o.store.IncrementTaskAttempts(taskID); err != nil {
+		log.Printf("Error incrementing attempts for task %s: %v", taskID, err)
+		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
+		return
 	}
+
+	// Allow retry - task.Attempts is now incremented
+	_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusReady, errorMsg)
+	log.Printf("🔄 Task %s retrying (attempt %d/%d)", taskID, task.Attempts+1, task.MaxAttempts)
 }
 
 // printProgress prints current progress

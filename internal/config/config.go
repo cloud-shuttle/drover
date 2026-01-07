@@ -33,6 +33,9 @@ type Config struct {
 
 	// Project directory (detected)
 	ProjectDir string
+
+	// Verbose mode for debugging
+	Verbose bool
 }
 
 // Load loads configuration from environment and defaults

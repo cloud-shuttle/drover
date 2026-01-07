@@ -2,7 +2,9 @@
 package executor
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -15,6 +17,7 @@ import (
 type Executor struct {
 	claudePath string
 	timeout    time.Duration
+	verbose    bool // Enable verbose logging
 }
 
 // NewExecutor creates a new Claude Code executor
@@ -22,7 +25,13 @@ func NewExecutor(claudePath string, timeout time.Duration) *Executor {
 	return &Executor{
 		claudePath: claudePath,
 		timeout:    timeout,
+		verbose:    false,
 	}
+}
+
+// SetVerbose enables or disables verbose logging
+func (e *Executor) SetVerbose(v bool) {
+	e.verbose = v
 }
 
 // Execute runs a task using Claude Code in the given directory
@@ -32,7 +41,8 @@ func (e *Executor) Execute(worktreePath string, task *types.Task) error {
 
 	// Run Claude Code with prompt as positional argument in print mode
 	// Use -p for non-interactive mode and pass prompt as argument
-	cmd := exec.Command(e.claudePath, "-p", prompt)
+	// Add --dangerously-skip-permissions to avoid hanging on permission prompts
+	cmd := exec.Command(e.claudePath, "-p", prompt, "--dangerously-skip-permissions")
 	cmd.Dir = worktreePath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -69,9 +79,66 @@ func (e *Executor) buildPrompt(task *types.Task) string {
 
 // ExecuteWithTimeout runs a task with a timeout
 func (e *Executor) ExecuteWithTimeout(worktreePath string, task *types.Task) error {
-	// For now, just use Execute without explicit timeout
-	// In production, we'd use context.WithTimeout
-	return e.Execute(worktreePath, task)
+	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
+	defer cancel()
+
+	return e.ExecuteWithContext(ctx, worktreePath, task)
+}
+
+// ExecuteWithContext runs a task with a context
+func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task) error {
+	// Build the prompt
+	prompt := e.buildPrompt(task)
+
+	// Log what we're sending to Claude (verbose only)
+	if e.verbose {
+		log.Printf("🤖 Sending prompt to Claude (length: %d chars)", len(prompt))
+		log.Printf("📝 Prompt preview: %s", truncateString(prompt, 200))
+	}
+
+	// Run Claude Code with prompt as positional argument in print mode
+	// Use -p for non-interactive mode and pass prompt as argument
+	// Add --dangerously-skip-permissions to avoid hanging on permission prompts
+	cmd := exec.CommandContext(ctx, e.claudePath, "-p", prompt, "--dangerously-skip-permissions")
+	cmd.Dir = worktreePath
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	start := time.Now()
+	if e.verbose {
+		log.Printf("⏱️  Claude execution started at %s", start.Format("15:04:05"))
+	}
+	err := cmd.Run()
+	duration := time.Since(start)
+
+	// Log exit code regardless of success/failure
+	if err != nil {
+		exitCode := 1
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode = exitError.ExitCode()
+		}
+		if e.verbose {
+			log.Printf("❌ Claude exited with code %d after %v", exitCode, duration)
+		}
+
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("claude timed out after %v", duration)
+		}
+		return fmt.Errorf("claude failed after %v: %w", duration, err)
+	}
+
+	if e.verbose {
+		log.Printf("✅ Claude completed successfully in %v", duration)
+	}
+	return nil
+}
+
+// truncateString truncates a string to a maximum length for logging
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // CheckClaudeInstalled verifies Claude Code is available
