@@ -8,9 +8,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cloud-shuttle/drover/pkg/types"
 )
+
+// Global mutex to serialize MergeToMain operations across all workers
+// Multiple workers checking out and merging to main simultaneously causes git index lock conflicts
+var mergeMutex sync.Mutex
 
 // WorktreeManager creates and manages git worktrees
 type WorktreeManager struct {
@@ -42,6 +47,16 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 		return "", fmt.Errorf("creating worktree directory: %w", err)
 	}
 
+	// Clean up any existing worktree at this path first
+	// This handles stale worktrees from interrupted runs
+	if _, err := os.Stat(worktreePath); err == nil {
+		// Directory exists, try to remove it
+		wm.Remove(task.ID)
+	}
+
+	// Also prune any stale git worktree registrations
+	wm.PruneStale(task.ID)
+
 	// Create the worktree
 	cmd := exec.Command("git", "worktree", "add", worktreePath)
 	cmd.Dir = wm.baseDir
@@ -51,6 +66,22 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 	}
 
 	return worktreePath, nil
+}
+
+// PruneStale removes stale git worktree registrations for a specific task
+func (wm *WorktreeManager) PruneStale(taskID string) {
+	worktreePath := filepath.Join(wm.worktreeDir, taskID)
+
+	// Try to prune stale worktree registrations
+	// Use git worktree prune to clean up stale registrations
+	cmd := exec.Command("git", "worktree", "prune", "--worktrees", worktreePath)
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run() // Ignore errors, this is best-effort cleanup
+
+	// Also try force remove if the worktree is registered but missing
+	cmd = exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run() // Ignore errors
 }
 
 // Remove removes a worktree
@@ -139,6 +170,10 @@ func (wm *WorktreeManager) Commit(taskID, message string) error {
 
 // MergeToMain merges the worktree changes to main branch
 func (wm *WorktreeManager) MergeToMain(taskID string) error {
+	// Serialize merge operations to prevent git index lock conflicts
+	mergeMutex.Lock()
+	defer mergeMutex.Unlock()
+
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
 	branchName := fmt.Sprintf("drover-%s", taskID)
 

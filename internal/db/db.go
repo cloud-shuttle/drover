@@ -4,6 +4,7 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cloud-shuttle/drover/pkg/types"
@@ -12,7 +13,7 @@ import (
 
 // Store manages database operations
 type Store struct {
-	db *sql.DB
+	DB *sql.DB
 }
 
 // ProjectStatus summarizes the current state
@@ -38,12 +39,22 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("enabling foreign keys: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	// Enable WAL mode for better concurrent access
+	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		return nil, fmt.Errorf("enabling WAL mode: %w", err)
+	}
+
+	// Set busy timeout to handle lock contention gracefully
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		return nil, fmt.Errorf("setting busy timeout: %w", err)
+	}
+
+	return &Store{DB: db}, nil
 }
 
 // Close closes the database connection
 func (s *Store) Close() error {
-	return s.db.Close()
+	return s.DB.Close()
 }
 
 // InitSchema creates the database schema
@@ -92,7 +103,7 @@ func (s *Store) InitSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_dependencies_blocked_by ON task_dependencies(blocked_by);
 	`
 
-	_, err := s.db.Exec(schema)
+	_, err := s.DB.Exec(schema)
 	return err
 }
 
@@ -109,7 +120,7 @@ func (s *Store) CreateEpic(title, description string) (*types.Epic, error) {
 		CreatedAt:   now,
 	}
 
-	_, err := s.db.Exec(`
+	_, err := s.DB.Exec(`
 		INSERT INTO epics (id, title, description, status, created_at)
 		VALUES (?, ?, ?, ?, ?)
 	`, epic.ID, epic.Title, epic.Description, epic.Status, epic.CreatedAt)
@@ -143,7 +154,7 @@ func (s *Store) CreateTask(title, description, epicID string, priority int, bloc
 		task.Status = types.TaskStatusBlocked
 	}
 
-	tx, err := s.db.Begin()
+	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("beginning transaction: %w", err)
 	}
@@ -185,7 +196,7 @@ func (s *Store) GetProjectStatus() (*ProjectStatus, error) {
 	status := &ProjectStatus{}
 
 	// Count by status
-	rows, err := s.db.Query(`
+	rows, err := s.DB.Query(`
 		SELECT status, COUNT(*) FROM tasks GROUP BY status
 	`)
 	if err != nil {
@@ -223,7 +234,7 @@ func (s *Store) GetProjectStatus() (*ProjectStatus, error) {
 
 // ClaimTask attempts to atomically claim a ready task
 func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
-	tx, err := s.db.Begin()
+	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +295,7 @@ func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
 // GetTaskStatus returns the current status of a task
 func (s *Store) GetTaskStatus(taskID string) (types.TaskStatus, error) {
 	var status string
-	err := s.db.QueryRow(`
+	err := s.DB.QueryRow(`
 		SELECT status FROM tasks WHERE id = ?
 	`, taskID).Scan(&status)
 	if err != nil {
@@ -296,7 +307,7 @@ func (s *Store) GetTaskStatus(taskID string) (types.TaskStatus, error) {
 // UpdateTaskStatus updates a task's status
 func (s *Store) UpdateTaskStatus(taskID string, status types.TaskStatus, lastError string) error {
 	now := time.Now().Unix()
-	_, err := s.db.Exec(`
+	_, err := s.DB.Exec(`
 		UPDATE tasks
 		SET status = ?, last_error = ?, updated_at = ?
 		WHERE id = ?
@@ -307,7 +318,7 @@ func (s *Store) UpdateTaskStatus(taskID string, status types.TaskStatus, lastErr
 // IncrementTaskAttempts increments the attempt counter for a task
 func (s *Store) IncrementTaskAttempts(taskID string) error {
 	now := time.Now().Unix()
-	_, err := s.db.Exec(`
+	_, err := s.DB.Exec(`
 		UPDATE tasks
 		SET attempts = attempts + 1, updated_at = ?
 		WHERE id = ?
@@ -323,7 +334,7 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 	var epicID sql.NullString
 	var description sql.NullString
 
-	err := s.db.QueryRow(`
+	err := s.DB.QueryRow(`
 		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 		       priority, status, attempts, max_attempts,
 		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
@@ -356,7 +367,7 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 
 // CompleteTask marks a task as completed and unblocks dependents
 func (s *Store) CompleteTask(taskID string) error {
-	tx, err := s.db.Begin()
+	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
@@ -420,6 +431,41 @@ func (s *Store) CompleteTask(taskID string) error {
 	}
 
 	return tx.Commit()
+}
+
+// ResetTasks resets tasks with given statuses back to ready
+func (s *Store) ResetTasks(statusesToReset []types.TaskStatus) (int, error) {
+	now := time.Now().Unix()
+
+	// Build placeholder list for SQL IN clause
+	placeholders := make([]string, len(statusesToReset))
+	args := make([]interface{}, len(statusesToReset)+1)
+	// Put timestamp first since it's for updated_at = ?
+	args[0] = now
+	for i, status := range statusesToReset {
+		placeholders[i] = "?"
+		args[i+1] = string(status)
+	}
+
+	// Reset tasks to ready status
+	query := fmt.Sprintf(`
+		UPDATE tasks
+		SET status = 'ready', claimed_by = NULL, claimed_at = NULL,
+		    attempts = 0, last_error = NULL, updated_at = ?
+		WHERE status IN (%s)
+	`, fmt.Sprintf("%s", strings.Join(placeholders, ", ")))
+
+	result, err := s.DB.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("resetting tasks: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("getting affected rows: %w", err)
+	}
+
+	return int(rowsAffected), nil
 }
 
 // generateID generates a unique ID with the given prefix

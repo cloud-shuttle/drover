@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/cloud-shuttle/drover/internal/db"
+	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/cloud-shuttle/drover/internal/workflow"
 	"github.com/spf13/cobra"
 )
@@ -247,6 +251,198 @@ func resumeCmd() *cobra.Command {
 			fmt.Printf("Found %d incomplete tasks\n", status.InProgress)
 			return nil
 		},
+	}
+}
+
+func resetCmd() *cobra.Command {
+	var (
+		resetCompleted bool
+		resetInProgress bool
+		resetClaimed bool
+		resetFailed bool
+	)
+
+	command := &cobra.Command{
+		Use:   "reset",
+		Short: "Reset tasks back to ready status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			var statusesToReset []types.TaskStatus
+
+			if resetCompleted {
+				statusesToReset = append(statusesToReset, types.TaskStatusCompleted)
+			}
+			if resetInProgress {
+				statusesToReset = append(statusesToReset, types.TaskStatusInProgress)
+			}
+			if resetClaimed {
+				statusesToReset = append(statusesToReset, types.TaskStatusClaimed)
+			}
+			if resetFailed {
+				statusesToReset = append(statusesToReset, types.TaskStatusFailed)
+			}
+
+			// If no flags specified, reset claimed, in-progress and completed
+			if len(statusesToReset) == 0 {
+				statusesToReset = []types.TaskStatus{
+					types.TaskStatusClaimed,
+					types.TaskStatusInProgress,
+					types.TaskStatusCompleted,
+				}
+			}
+
+			count, err := store.ResetTasks(statusesToReset)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("🔄 Reset %d tasks to ready status\n", count)
+			return nil
+		},
+	}
+
+	command.Flags().BoolVar(&resetCompleted, "completed", false, "Reset completed tasks")
+	command.Flags().BoolVar(&resetInProgress, "in-progress", false, "Reset in-progress tasks")
+	command.Flags().BoolVar(&resetClaimed, "claimed", false, "Reset claimed tasks")
+	command.Flags().BoolVar(&resetFailed, "failed", false, "Reset failed tasks")
+
+	return command
+}
+
+func exportCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "export",
+		Short: "Export tasks to beads format",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectDir, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			// Get all tasks from database
+			rows, err := store.DB.Query(`
+				SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+				       priority, status, created_at
+				FROM tasks
+				ORDER BY created_at ASC
+			`)
+			if err != nil {
+				return fmt.Errorf("querying tasks: %w", err)
+			}
+			defer rows.Close()
+
+			var tasks []*types.Task
+			for rows.Next() {
+				var task types.Task
+				var description sql.NullString
+				var epicID sql.NullString
+				err := rows.Scan(&task.ID, &task.Title, &description, &epicID,
+					&task.Priority, &task.Status, &task.CreatedAt)
+				if err != nil {
+					return fmt.Errorf("scanning task: %w", err)
+				}
+				task.Description = description.String
+				task.EpicID = epicID.String
+				tasks = append(tasks, &task)
+			}
+
+			// Get all epics from database
+			rows2, err := store.DB.Query(`
+				SELECT id, title, COALESCE(description, ''), status, created_at
+				FROM epics
+				ORDER BY created_at ASC
+			`)
+			if err != nil {
+				return fmt.Errorf("querying epics: %w", err)
+			}
+			defer rows2.Close()
+
+			var epics []*types.Epic
+			for rows2.Next() {
+				var epic types.Epic
+				var description sql.NullString
+				err := rows2.Scan(&epic.ID, &epic.Title, &description, &epic.Status, &epic.CreatedAt)
+				if err != nil {
+					return fmt.Errorf("scanning epic: %w", err)
+				}
+				epic.Description = description.String
+				epics = append(epics, &epic)
+			}
+
+			// Write beads.jsonl
+			beadsDir := filepath.Join(projectDir, ".beads")
+			if err := os.MkdirAll(beadsDir, 0755); err != nil {
+				return fmt.Errorf("creating beads dir: %w", err)
+			}
+
+			jsonlPath := filepath.Join(beadsDir, "beads.jsonl")
+			file, err := os.Create(jsonlPath)
+			if err != nil {
+				return fmt.Errorf("creating beads.jsonl: %w", err)
+			}
+			defer file.Close()
+
+			encoder := json.NewEncoder(file)
+
+			// Export epics
+			for _, epic := range epics {
+				record := map[string]interface{}{
+					"type":      "epic",
+					"id":        epic.ID,
+					"timestamp": time.Unix(epic.CreatedAt, 0),
+					"data": map[string]interface{}{
+						"title":       epic.Title,
+						"description": epic.Description,
+						"status":      epic.Status,
+					},
+				}
+				if err := encoder.Encode(record); err != nil {
+					return fmt.Errorf("encoding epic: %w", err)
+				}
+			}
+
+			// Export tasks
+			for _, task := range tasks {
+				status := droverStatusToBeads(task.Status)
+				record := map[string]interface{}{
+					"type":      "bead",
+					"id":        task.ID,
+					"timestamp": time.Unix(task.CreatedAt, 0),
+					"data": map[string]interface{}{
+						"title":       task.Title,
+						"description": task.Description,
+						"status":      status,
+						"priority":    task.Priority,
+						"epic_id":     task.EpicID,
+					},
+				}
+				if err := encoder.Encode(record); err != nil {
+					return fmt.Errorf("encoding task: %w", err)
+				}
+			}
+
+			fmt.Printf("✅ Exported %d epics and %d tasks to %s\n", len(epics), len(tasks), jsonlPath)
+			return nil
+		},
+	}
+}
+
+func droverStatusToBeads(status types.TaskStatus) string {
+	switch status {
+	case types.TaskStatusReady, types.TaskStatusClaimed, types.TaskStatusBlocked:
+		return "open"
+	case types.TaskStatusInProgress:
+		return "active"
+	case types.TaskStatusCompleted, types.TaskStatusFailed:
+		return "closed"
+	default:
+		return "open"
 	}
 }
 

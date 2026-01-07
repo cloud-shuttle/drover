@@ -37,6 +37,8 @@ handles failures gracefully, and guarantees progress through crashes and restart
 		epicCmd(),
 		statusCmd(),
 		resumeCmd(),
+		resetCmd(),
+		exportCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
