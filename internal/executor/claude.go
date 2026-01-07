@@ -30,11 +30,9 @@ func (e *Executor) Execute(worktreePath string, task *types.Task) error {
 	// Build the prompt
 	prompt := e.buildPrompt(task)
 
-	// Run Claude Code
-	cmd := exec.Command(e.claudePath,
-		"--prompt", prompt,
-		"--non-interactive",
-	)
+	// Run Claude Code with prompt as positional argument in print mode
+	// Use -p for non-interactive mode and pass prompt as argument
+	cmd := exec.Command(e.claudePath, "-p", prompt)
 	cmd.Dir = worktreePath
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
