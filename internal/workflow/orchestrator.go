@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,19 +165,37 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	}
 	defer o.git.Remove(task.ID)
 
-	// Execute Claude Code
-	if err := o.executor.ExecuteWithTimeout(worktreePath, task); err != nil {
-		log.Printf("❌ Task %s failed: claude execution: %v", task.ID, err)
+	// Execute Claude Code and capture the result
+	result := o.executor.ExecuteWithTimeout(worktreePath, task)
+	if !result.Success {
+		log.Printf("❌ Task %s failed: claude execution: %v", task.ID, result.Error)
+		o.handleTaskFailure(task.ID, result.Error.Error())
+		return
+	}
+
+	// Store the Claude output for later use (if no changes detected)
+	claudeOutput := result.Output
+
+	// Commit changes (if any)
+	commitMsg := fmt.Sprintf("drover: %s\n\nTask: %s", task.ID, task.Title)
+	hasChanges, err := o.git.Commit(task.ID, commitMsg)
+	if err != nil {
+		log.Printf("❌ Task %s failed: committing: %v", task.ID, err)
 		o.handleTaskFailure(task.ID, err.Error())
 		return
 	}
 
-	// Commit changes (if any)
-	commitMsg := fmt.Sprintf("drover: %s\n\nTask: %s", task.ID, task.Title)
-	if err := o.git.Commit(task.ID, commitMsg); err != nil {
-		log.Printf("❌ Task %s failed: committing: %v", task.ID, err)
-		o.handleTaskFailure(task.ID, err.Error())
-		return
+	// Log diagnostic output when no changes were detected
+	if !hasChanges && o.verbose {
+		log.Printf("╔════════════════════════════════════════════════════════════════════════╗")
+		log.Printf("║ ⚠️  Claude completed but made NO CHANGES for task %s", task.ID)
+		log.Printf("╠════════════════════════════════════════════════════════════════════════╣")
+		log.Printf("║ Claude Output:")
+		log.Printf("╠──────────────────────────────────────────────────────────────────────────")
+		for _, line := range strings.Split(claudeOutput, "\n") {
+			log.Printf("║ %s", line)
+		}
+		log.Printf("╚════════════════════════════════════════════════════════════════════════╝")
 	}
 
 	// Try to merge to main (if there are changes to merge)

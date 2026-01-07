@@ -1,0 +1,66 @@
+# Drover Task Template
+# Use this template to create high-quality, actionable tasks
+
+title: "Specific Component/Feature Name - Action Verb"
+description: |
+  Detailed description of what needs to be done.
+
+  Include:
+  - Target files/packages (e.g., packages/components/src/button/)
+  - Specific action (create/update/fix/test/refactor)
+  - Technical details (function names, feature flags, file paths)
+  - Acceptance criteria (how to verify it works)
+
+# Example good tasks:
+
+# Example 1: Specific component update
+title: "Add New York variant to Button component"
+description: |
+  Create packages/components/src/button/new_york.rs with:
+  - New York theme styling (smaller border-radius, muted colors)
+  - Same props API as default variant
+  - Consistent with other New York variants
+  Tests in packages/components/src/button/new_york_tests.rs
+
+# Example 2: Bug fix
+title: "Fix memory leak in DatePicker on unmount"
+description: |
+  In packages/components/src/datepicker/default.rs:
+  - Add Drop impl for DatePickerState to clean up closures
+  - Verify no dangling refs using cargo +nightly leak
+  - Add test in datepicker_tests.rs for proper cleanup
+
+# Example 3: Test addition
+title: "Add E2E tests for ComboBox keyboard navigation"
+description: |
+  Create tests/e2e/combobox-keyboard.spec.ts covering:
+  - Arrow up/down navigation
+  - Enter to select
+  - Escape to close
+  - Tab to focus trap
+  Uses Playwright API with browser context
+
+# Example 4: Feature implementation
+title: "Implement lazy loading for Chart components"
+description: |
+  Add behind [feature = "lazy-charts"] flag:
+  - packages/components/src/chart/lazy_loader.rs
+  - Dynamically import chart only when visible
+  - Reduce initial bundle by ~150KB
+  - Add loading spinner placeholder
+
+# Example 5: Documentation
+title: "Document ComboBox API differences from Select"
+description: |
+  In packages/components/src/combobox/README.md:
+  - Compare with Select component
+  - Highlight free-text filtering capability
+  - Show custom rendering examples
+  - List all props with TypeScript signatures
+
+# Quality Checklist:
+# [ ] Title starts with action verb (Create, Fix, Add, Update, Implement)
+# [ ] Description mentions specific files/packages
+# [ ] Description includes acceptance criteria
+# [ ] Technical details provided (function names, feature flags)
+# [ ] Context is clear (why this is needed, what problem it solves)

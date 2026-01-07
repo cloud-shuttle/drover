@@ -120,7 +120,8 @@ func (wm *WorktreeManager) Remove(taskID string) error {
 }
 
 // Commit commits all changes in the worktree
-func (wm *WorktreeManager) Commit(taskID, message string) error {
+// Returns (hasChanges, error) - hasChanges is true if changes were committed
+func (wm *WorktreeManager) Commit(taskID, message string) (bool, error) {
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
 
 	// Check if there are any changes to commit
@@ -128,7 +129,7 @@ func (wm *WorktreeManager) Commit(taskID, message string) error {
 	cmd.Dir = worktreePath
 	output, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("checking status: %w", err)
+		return false, fmt.Errorf("checking status: %w", err)
 	}
 
 	// If no changes, return success without committing
@@ -137,7 +138,7 @@ func (wm *WorktreeManager) Commit(taskID, message string) error {
 		if wm.verbose {
 			log.Printf("📭 No changes detected in worktree %s", taskID)
 		}
-		return nil // Nothing to commit
+		return false, nil // Nothing to commit
 	}
 
 	// Log what files changed (verbose only)
@@ -155,7 +156,7 @@ func (wm *WorktreeManager) Commit(taskID, message string) error {
 	cmd = exec.Command("git", "add", "-A")
 	cmd.Dir = worktreePath
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("staging changes: %w\n%s", err, output)
+		return false, fmt.Errorf("staging changes: %w\n%s", err, output)
 	}
 
 	// Commit
@@ -169,16 +170,16 @@ func (wm *WorktreeManager) Commit(taskID, message string) error {
 			if wm.verbose {
 				log.Printf("📭 No changes to commit (working tree clean)")
 			}
-			return nil // No problem, just no changes to commit
+			return false, nil // No problem, just no changes to commit
 		}
-		return fmt.Errorf("committing: %w\n%s", err, output)
+		return false, fmt.Errorf("committing: %w\n%s", err, output)
 	}
 
 	if wm.verbose {
 		log.Printf("✅ Committed changes for task %s", taskID)
 	}
 
-	return nil
+	return true, nil
 }
 
 // MergeToMain merges the worktree changes to main branch

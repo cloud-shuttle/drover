@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/db"
+	"github.com/cloud-shuttle/drover/internal/template"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/cloud-shuttle/drover/internal/workflow"
 	"github.com/spf13/cobra"
@@ -47,11 +48,50 @@ func initCmd() *cobra.Command {
 				return fmt.Errorf("initializing schema: %w", err)
 			}
 
+			// Copy task template
+			templatePath := filepath.Join(droverDir, "task_template.yaml")
+			templateContent := `# Drover Task Template
+# Use this template to create high-quality, actionable tasks
+
+title: "Specific Component/Feature Name - Action Verb"
+description: |
+  Detailed description of what needs to be done.
+
+  Include:
+  - Target files/packages (e.g., packages/components/src/button/)
+  - Specific action (create/update/fix/test/refactor)
+  - Technical details (function names, feature flags, file paths)
+  - Acceptance criteria (how to verify it works)
+
+# Example good tasks:
+
+# Example 1: Specific component update
+title: "Add New York variant to Button component"
+description: |
+  Create packages/components/src/button/new_york.rs with:
+  - New York theme styling (smaller border-radius, muted colors)
+  - Same props API as default variant
+  - Consistent with other New York variants
+  Tests in packages/components/src/button/new_york_tests.rs
+
+# Quality Checklist:
+# [ ] Title starts with action verb (Create, Fix, Add, Update, Implement)
+# [ ] Description mentions specific files/packages
+# [ ] Description includes acceptance criteria
+# [ ] Technical details provided (function names, feature flags)
+# [ ] Context is clear (why this is needed, what problem it solves)
+`
+			if err := os.WriteFile(templatePath, []byte(templateContent), 0644); err != nil {
+				return fmt.Errorf("creating task template: %w", err)
+			}
+
 			fmt.Printf("🐂 Initialized Drover in %s\n", droverDir)
 			fmt.Println("\nNext steps:")
 			fmt.Println("  drover epic add \"My Epic\"")
 			fmt.Println("  drover add \"My first task\" --epic <epic-id>")
 			fmt.Println("  drover run")
+			fmt.Println("\n📋 Task quality template created: .drover/task_template.yaml")
+			fmt.Println("   Review it before adding tasks for best results!")
 
 			return nil
 		},
@@ -123,11 +163,16 @@ func addCmd() *cobra.Command {
 		epicID    string
 		priority  int
 		blockedBy []string
+		skipValidation bool
 	)
 
 	command := &cobra.Command{
 		Use:   "add <title>",
 		Short: "Add a new task",
+		Long: `Add a new task to the project.
+
+Tasks are validated against quality standards to ensure they are actionable.
+Use --skip-validation to bypass validation (not recommended).`,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, store, err := requireProject()
@@ -136,7 +181,32 @@ func addCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			task, err := store.CreateTask(args[0], desc, epicID, priority, blockedBy)
+			title := args[0]
+
+			// Validate task quality unless explicitly skipped
+			if !skipValidation {
+				errors := template.Validate(title, desc)
+				if len(errors) > 0 {
+					fmt.Printf("⚠️  Task quality validation failed:\n\n")
+					for _, e := range errors {
+						fmt.Printf("  [%s] %s\n", e.Field, e.Message)
+						for _, s := range e.Suggestions {
+							fmt.Printf("    → %s\n", s)
+						}
+						fmt.Println()
+					}
+					fmt.Println("💡 Tips for better tasks:")
+					fmt.Println("  1. Be specific: mention files, components, or packages")
+					fmt.Println("  2. Use action verbs: Create, Fix, Add, Update, Implement")
+					fmt.Println("  3. Add acceptance criteria: how to verify it works")
+					fmt.Println("  4. Include technical details: function names, feature flags")
+					fmt.Println("\nReference template: .drover/task_template.yaml")
+					fmt.Println("\nUse --skip-validation to create this task anyway (not recommended)")
+					return fmt.Errorf("task validation failed")
+				}
+			}
+
+			task, err := store.CreateTask(title, desc, epicID, priority, blockedBy)
 			if err != nil {
 				return err
 			}
@@ -150,6 +220,7 @@ func addCmd() *cobra.Command {
 	command.Flags().StringVarP(&epicID, "epic", "e", "", "Assign to epic")
 	command.Flags().IntVarP(&priority, "priority", "p", 0, "Task priority (higher = more urgent)")
 	command.Flags().StringSliceVar(&blockedBy, "blocked-by", nil, "Task IDs this depends on")
+	command.Flags().BoolVar(&skipValidation, "skip-validation", false, "Skip task quality validation (not recommended)")
 	return command
 }
 

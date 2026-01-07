@@ -43,9 +43,9 @@ func TestExecutor_Execute_Success(t *testing.T) {
 		Description: "Test Description",
 	}
 
-	err := exec.Execute(tmpDir, task)
-	if err != nil {
-		t.Errorf("Execute failed: %v", err)
+	result := exec.Execute(tmpDir, task)
+	if !result.Success {
+		t.Errorf("Execute failed: %v", result.Error)
 	}
 }
 
@@ -62,9 +62,9 @@ func TestExecutor_ExecuteWithTimeout_Success(t *testing.T) {
 		Description: "Test Description",
 	}
 
-	err := exec.ExecuteWithTimeout(tmpDir, task)
-	if err != nil {
-		t.Errorf("ExecuteWithTimeout failed: %v", err)
+	result := exec.ExecuteWithTimeout(tmpDir, task)
+	if !result.Success {
+		t.Errorf("ExecuteWithTimeout failed: %v", result.Error)
 	}
 }
 
@@ -81,13 +81,13 @@ func TestExecutor_ExecuteWithTimeout_Timeout(t *testing.T) {
 		Description: "Test Description",
 	}
 
-	err := exec.ExecuteWithTimeout(tmpDir, task)
-	if err == nil {
-		t.Error("Expected timeout error, got nil")
+	result := exec.ExecuteWithTimeout(tmpDir, task)
+	if result.Success {
+		t.Error("Expected timeout error, got success")
 	}
 	// Error message should contain "timed out"
-	if err != nil && !containsString(err.Error(), "timed out") {
-		t.Errorf("Expected timeout error message, got: %v", err)
+	if result.Error != nil && !containsString(result.Error.Error(), "timed out") {
+		t.Errorf("Expected timeout error message, got: %v", result.Error)
 	}
 }
 
@@ -104,9 +104,9 @@ func TestExecutor_Execute_Failure(t *testing.T) {
 		Description: "Test Description",
 	}
 
-	err := exec.Execute(tmpDir, task)
-	if err == nil {
-		t.Error("Expected error for failed execution, got nil")
+	result := exec.Execute(tmpDir, task)
+	if result.Success {
+		t.Error("Expected error for failed execution, got success")
 	}
 }
 
@@ -127,10 +127,10 @@ func TestExecutor_ExecuteWithContext_Cancel(t *testing.T) {
 		Description: "Test Description",
 	}
 
-	err := exec.ExecuteWithContext(ctx, tmpDir, task)
+	result := exec.ExecuteWithContext(ctx, tmpDir, task)
 	// Context cancellation should cause an error (command killed)
-	if err == nil {
-		t.Error("Expected error when context is cancelled, got nil")
+	if result.Success {
+		t.Error("Expected error when context is cancelled, got success")
 	}
 }
 
@@ -191,9 +191,9 @@ echo "$@" > ` + filepath.Join(tmpDir, "prompt.txt") + "\n" + `exit 0
 		EpicID:      "epic-456",
 	}
 
-	err := exec.Execute(tmpDir, task)
-	if err != nil {
-		t.Fatalf("Execute failed: %v", err)
+	result := exec.Execute(tmpDir, task)
+	if !result.Success {
+		t.Fatalf("Execute failed: %v", result.Error)
 	}
 
 	// Read the captured prompt

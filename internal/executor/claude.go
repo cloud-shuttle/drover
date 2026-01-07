@@ -4,6 +4,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -12,6 +13,13 @@ import (
 
 	"github.com/cloud-shuttle/drover/pkg/types"
 )
+
+// ExecutionResult contains the result of a Claude execution
+type ExecutionResult struct {
+	Success bool
+	Output  string
+	Error   error
+}
 
 // Executor runs tasks using Claude Code
 type Executor struct {
@@ -34,8 +42,8 @@ func (e *Executor) SetVerbose(v bool) {
 	e.verbose = v
 }
 
-// Execute runs a task using Claude Code in the given directory
-func (e *Executor) Execute(worktreePath string, task *types.Task) error {
+// Execute runs a task using Claude Code in the given directory and returns the execution result
+func (e *Executor) Execute(worktreePath string, task *types.Task) *ExecutionResult {
 	// Build the prompt
 	prompt := e.buildPrompt(task)
 
@@ -44,18 +52,32 @@ func (e *Executor) Execute(worktreePath string, task *types.Task) error {
 	// Add --dangerously-skip-permissions to avoid hanging on permission prompts
 	cmd := exec.Command(e.claudePath, "-p", prompt, "--dangerously-skip-permissions")
 	cmd.Dir = worktreePath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// Capture output while also streaming to stdout/stderr
+	var outputBuf, errBuf strings.Builder
+	cmd.Stdout = io.MultiWriter(os.Stdout, &outputBuf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &errBuf)
 
 	start := time.Now()
 	err := cmd.Run()
 	duration := time.Since(start)
 
+	// Combine stdout and stderr for the result
+	fullOutput := outputBuf.String() + errBuf.String()
+
 	if err != nil {
-		return fmt.Errorf("claude failed after %v: %w", duration, err)
+		return &ExecutionResult{
+			Success: false,
+			Output:  fullOutput,
+			Error:   fmt.Errorf("claude failed after %v: %w", duration, err),
+		}
 	}
 
-	return nil
+	return &ExecutionResult{
+		Success: true,
+		Output:  fullOutput,
+		Error:   nil,
+	}
 }
 
 // buildPrompt creates the Claude prompt for a task
@@ -77,16 +99,16 @@ func (e *Executor) buildPrompt(task *types.Task) string {
 	return prompt.String()
 }
 
-// ExecuteWithTimeout runs a task with a timeout
-func (e *Executor) ExecuteWithTimeout(worktreePath string, task *types.Task) error {
+// ExecuteWithTimeout runs a task with a timeout and returns the execution result
+func (e *Executor) ExecuteWithTimeout(worktreePath string, task *types.Task) *ExecutionResult {
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
 	return e.ExecuteWithContext(ctx, worktreePath, task)
 }
 
-// ExecuteWithContext runs a task with a context
-func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task) error {
+// ExecuteWithContext runs a task with a context and returns the execution result
+func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task) *ExecutionResult {
 	// Build the prompt
 	prompt := e.buildPrompt(task)
 
@@ -101,8 +123,11 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, 
 	// Add --dangerously-skip-permissions to avoid hanging on permission prompts
 	cmd := exec.CommandContext(ctx, e.claudePath, "-p", prompt, "--dangerously-skip-permissions")
 	cmd.Dir = worktreePath
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// Capture output while also streaming to stdout/stderr for real-time viewing
+	var outputBuf, errBuf strings.Builder
+	cmd.Stdout = io.MultiWriter(os.Stdout, &outputBuf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &errBuf)
 
 	start := time.Now()
 	if e.verbose {
@@ -110,6 +135,9 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, 
 	}
 	err := cmd.Run()
 	duration := time.Since(start)
+
+	// Combine stdout and stderr for the result
+	fullOutput := outputBuf.String() + errBuf.String()
 
 	// Log exit code regardless of success/failure
 	if err != nil {
@@ -122,15 +150,27 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, 
 		}
 
 		if ctx.Err() == context.DeadlineExceeded {
-			return fmt.Errorf("claude timed out after %v", duration)
+			return &ExecutionResult{
+				Success: false,
+				Output:  fullOutput,
+				Error:   fmt.Errorf("claude timed out after %v", duration),
+			}
 		}
-		return fmt.Errorf("claude failed after %v: %w", duration, err)
+		return &ExecutionResult{
+			Success: false,
+			Output:  fullOutput,
+			Error:   fmt.Errorf("claude failed after %v: %w", duration, err),
+		}
 	}
 
 	if e.verbose {
 		log.Printf("✅ Claude completed successfully in %v", duration)
 	}
-	return nil
+	return &ExecutionResult{
+		Success: true,
+		Output:  fullOutput,
+		Error:   nil,
+	}
 }
 
 // truncateString truncates a string to a maximum length for logging
