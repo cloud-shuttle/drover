@@ -470,3 +470,76 @@ func generateID(prefix string) string {
 	// Simple ID generation - in production use UUID or similar
 	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
 }
+
+// ListTasks returns all tasks in the database
+func (s *Store) ListTasks() ([]*types.Task, error) {
+	rows, err := s.DB.Query(`
+		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+		       priority, status, attempts, max_attempts,
+		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
+		       created_at, updated_at
+		FROM tasks
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*types.Task
+	for rows.Next() {
+		var task types.Task
+		var claimedBy sql.NullString
+		var claimedAt sql.NullInt64
+		var epicID sql.NullString
+		var description sql.NullString
+
+		err := rows.Scan(
+			&task.ID, &task.Title, &description, &epicID,
+			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
+			&claimedBy, &claimedAt,
+			&task.CreatedAt, &task.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scanning task: %w", err)
+		}
+
+		task.Description = description.String
+		task.EpicID = epicID.String
+		if claimedBy.Valid {
+			task.ClaimedBy = claimedBy.String
+		}
+		if claimedAt.Valid {
+			unix := claimedAt.Int64
+			task.ClaimedAt = &unix
+		}
+
+		tasks = append(tasks, &task)
+	}
+
+	return tasks, nil
+}
+
+// GetBlockedBy returns the list of task IDs that block the given task
+func (s *Store) GetBlockedBy(taskID string) ([]string, error) {
+	rows, err := s.DB.Query(`
+		SELECT blocked_by
+		FROM task_dependencies
+		WHERE task_id = ?
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("querying dependencies: %w", err)
+	}
+	defer rows.Close()
+
+	var blockedBy []string
+	for rows.Next() {
+		var blockerID string
+		if err := rows.Scan(&blockerID); err != nil {
+			return nil, fmt.Errorf("scanning dependency: %w", err)
+		}
+		blockedBy = append(blockedBy, blockerID)
+	}
+
+	return blockedBy, nil
+}

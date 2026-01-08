@@ -4,6 +4,16 @@
 
 Drover is a durable workflow orchestrator for parallel AI agent execution. It coordinates multiple Claude Code instances to complete project tasks while handling failures, dependencies, and resource contention.
 
+**Primary Workflow Engine**: Drover uses **DBOS (Durable Operating System for Workflows)** as its primary orchestration engine. DBOS provides:
+- Automatic crash recovery and checkpointing
+- Built-in retry logic for failed operations
+- Exactly-once execution guarantees
+- Queue-based parallel execution with concurrency control
+
+**Database Configuration**:
+- **Development**: SQLite (default, zero setup)
+- **Production**: PostgreSQL (via `DBOS_SYSTEM_DATABASE_URL`)
+
 ## Design Goals
 
 1. **Durability** — Never lose progress, survive any failure
@@ -156,19 +166,23 @@ Workers are managed by a DBOS queue with concurrency limits.
 
 ### 1. DBOS for Durability
 
-**Decision**: Use DBOS Go for workflow orchestration instead of custom implementation.
+**Decision**: Use DBOS Go as the primary workflow orchestration engine.
 
 **Rationale**:
-- Battle-tested durable execution
-- Automatic crash recovery via Postgres checkpointing
+- Battle-tested durable execution with automatic crash recovery
 - Built-in queues with concurrency control
-- Exactly-once execution semantics
-- SQLite support for local development
+- Exactly-once execution semantics via checkpointing
+- **SQLite support for local development** (zero setup)
+- PostgreSQL for production (optional upgrade)
+
+**Default Configuration**:
+- Development: SQLite (`.drover/drover.db`) - no additional setup required
+- Production: PostgreSQL via `DBOS_SYSTEM_DATABASE_URL` environment variable
 
 **Trade-offs**:
-- Additional dependency
-- Learning curve for DBOS patterns
-- Postgres required for production (SQLite for dev)
+- Additional dependency (mitigated by SQLite zero-config)
+- Learning curve for DBOS patterns (well-documented)
+- Production requires PostgreSQL (but dev works with SQLite)
 
 ### 2. Git Worktrees for Isolation
 
@@ -185,20 +199,24 @@ Workers are managed by a DBOS queue with concurrency limits.
 - Worktree management complexity
 - Merge conflicts deferred to completion time
 
-### 3. Postgres-Based Task State
+### 3. SQLite-Based Task State
 
-**Decision**: Store task state in Postgres/SQLite rather than files.
+**Decision**: Store task state in SQLite by default, with PostgreSQL for production.
 
 **Rationale**:
-- Atomic operations (claim with `FOR UPDATE SKIP LOCKED`)
+- Atomic operations via transactions
 - Consistent view across workers
-- Natural fit with DBOS (same database)
+- Native DBOS integration (workflow state + task state in same DB)
 - Query flexibility for status and reporting
+- **Zero setup for local development**
+
+**Configuration**:
+- Default: SQLite at `.drover/drover.db`
+- Production: Set `DBOS_SYSTEM_DATABASE_URL` to PostgreSQL connection string
 
 **Trade-offs**:
-- Requires database setup (mitigated by SQLite default)
-- State not visible in filesystem
-- Migration complexity for schema changes
+- State not visible in filesystem (but queryable via CLI)
+- Schema migrations required for changes (handled by DBOS)
 
 ### 4. Single Orchestrator Workflow
 

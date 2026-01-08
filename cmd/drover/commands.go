@@ -11,10 +11,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/config"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/template"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/cloud-shuttle/drover/internal/workflow"
+	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +24,10 @@ func initCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "init",
 		Short: "Initialize Drover in the current project",
+		Long: `Initialize Drover in the current project.
+
+Creates a .drover directory with SQLite database for task storage.
+DBOS workflow engine is available for production use via DBOS_SYSTEM_DATABASE_URL.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
 			if err != nil {
@@ -86,6 +92,9 @@ description: |
 			}
 
 			fmt.Printf("🐂 Initialized Drover in %s\n", droverDir)
+			fmt.Println("\nWorkflow Engine:")
+			fmt.Println("  • SQLite mode (default): Zero setup for local development")
+			fmt.Println("  • DBOS mode (production): Set DBOS_SYSTEM_DATABASE_URL for PostgreSQL")
 			fmt.Println("\nNext steps:")
 			fmt.Println("  drover epic add \"My Epic\"")
 			fmt.Println("  drover add \"My first task\" --epic <epic-id>")
@@ -109,7 +118,11 @@ func runCmd() *cobra.Command {
 		Long: `Run all tasks to completion using parallel Claude Code agents.
 
 Tasks are executed respecting dependencies and priorities. Use --workers
-to control parallelism. Use --epic to filter execution to a specific epic.`,
+to control parallelism. Use --epic to filter execution to a specific epic.
+
+DBOS Workflow Engine:
+- Default: SQLite-based orchestration (zero setup)
+- With DBOS_SYSTEM_DATABASE_URL: DBOS with PostgreSQL (production mode)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectDir, store, err := requireProject()
 			if err != nil {
@@ -124,29 +137,16 @@ to control parallelism. Use --epic to filter execution to a specific epic.`,
 			}
 			runCfg.Verbose = verbose
 
-			// Create orchestrator
-			orch, err := workflow.NewOrchestrator(&runCfg, store, projectDir)
-			if err != nil {
-				return fmt.Errorf("creating orchestrator: %w", err)
+			// Check if DBOS mode is enabled via environment variable
+			dbosURL := os.Getenv("DBOS_SYSTEM_DATABASE_URL")
+
+			if dbosURL != "" {
+				// Use DBOS orchestrator for production
+				return runWithDBOS(cmd, &runCfg, projectDir, dbosURL)
 			}
 
-			// Setup context with cancellation
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			// Handle interrupt signals - only process the first one
-			sigCh := make(chan os.Signal, 1)
-			signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-			go func() {
-				<-sigCh
-				fmt.Println("\n🛑 Interrupt received, stopping gracefully...")
-				cancel()
-				// Stop listening for signals after first interrupt
-				signal.Stop(sigCh)
-			}()
-
-			// Run the orchestrator
-			return orch.Run(ctx)
+			// Default: Use SQLite-based orchestrator for local development
+			return runWithSQLite(cmd, &runCfg, store, projectDir)
 		},
 	}
 
@@ -155,6 +155,112 @@ to control parallelism. Use --epic to filter execution to a specific epic.`,
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging for debugging")
 
 	return cmd
+}
+
+// runWithDBOS executes tasks using DBOS workflow engine
+func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, projectDir, dbosURL string) error {
+	fmt.Println("🐂 Using DBOS workflow engine (PostgreSQL)")
+
+	// Initialize DBOS context
+	dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{
+		AppName:     "drover",
+		DatabaseURL: dbosURL,
+	})
+	if err != nil {
+		return fmt.Errorf("initializing DBOS: %w", err)
+	}
+
+	// Launch DBOS runtime
+	if err := dbos.Launch(dbosCtx); err != nil {
+		return fmt.Errorf("launching DBOS: %w", err)
+	}
+	defer dbos.Shutdown(dbosCtx, 5*time.Second)
+
+	// Create DBOS orchestrator
+	orch, err := workflow.NewDBOSOrchestrator(runCfg, dbosCtx, projectDir)
+	if err != nil {
+		return fmt.Errorf("creating DBOS orchestrator: %w", err)
+	}
+
+	// Register workflows
+	if err := orch.RegisterWorkflows(); err != nil {
+		return fmt.Errorf("registering workflows: %w", err)
+	}
+
+	// Get tasks from database
+	projectDir, store, err := requireProject()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+
+	tasks, err := store.ListTasks()
+	if err != nil {
+		return fmt.Errorf("listing tasks: %w", err)
+	}
+
+	// Convert to DBOS TaskInput format
+	taskInputs := make([]workflow.TaskInput, 0, len(tasks))
+	for _, task := range tasks {
+		if task.Status == "ready" || task.Status == "claimed" || task.Status == "in_progress" {
+			blockedBy, _ := store.GetBlockedBy(task.ID)
+			taskInputs = append(taskInputs, workflow.TaskInput{
+				TaskID:      task.ID,
+				Title:       task.Title,
+				Description: task.Description,
+				EpicID:      task.EpicID,
+				Priority:    task.Priority,
+				MaxAttempts: task.MaxAttempts,
+				BlockedBy:   blockedBy,
+			})
+		}
+	}
+
+	// Execute with queue for parallel processing
+	input := workflow.QueuedTasksInput{Tasks: taskInputs}
+	handle, err := dbos.RunWorkflow(dbosCtx, orch.ExecuteTasksWithQueue, input)
+	if err != nil {
+		return fmt.Errorf("starting DBOS workflow: %w", err)
+	}
+
+	// Wait for results
+	stats, err := handle.GetResult()
+	if err != nil {
+		return fmt.Errorf("DBOS workflow execution failed: %w", err)
+	}
+
+	// Print results
+	orch.PrintQueueStats(stats)
+	return nil
+}
+
+// runWithSQLite executes tasks using SQLite-based orchestrator
+func runWithSQLite(cmd *cobra.Command, runCfg *config.Config, store *db.Store, projectDir string) error {
+	fmt.Println("🐂 Using SQLite-based orchestrator (local mode)")
+
+	// Create orchestrator
+	orch, err := workflow.NewOrchestrator(runCfg, store, projectDir)
+	if err != nil {
+		return fmt.Errorf("creating orchestrator: %w", err)
+	}
+
+	// Setup context with cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Handle interrupt signals - only process the first one
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\n🛑 Interrupt received, stopping gracefully...")
+		cancel()
+		// Stop listening for signals after first interrupt
+		signal.Stop(sigCh)
+	}()
+
+	// Run the orchestrator
+	return orch.Run(ctx)
 }
 
 func addCmd() *cobra.Command {
@@ -298,15 +404,30 @@ func resumeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "resume",
 		Short: "Resume interrupted workflows",
+		Long: `Resume interrupted workflows.
+
+For SQLite mode: Resets in-progress tasks back to ready.
+For DBOS mode: Automatic workflow recovery via DBOS checkpointing.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Check if DBOS mode is enabled
+			dbosURL := os.Getenv("DBOS_SYSTEM_DATABASE_URL")
+
+			if dbosURL != "" {
+				// DBOS mode - workflows are automatically recovered on launch
+				fmt.Println("🐂 DBOS mode: Workflows are automatically recovered on 'drover run'")
+				fmt.Println("\nTo resume execution, simply run:")
+				fmt.Println("  drover run")
+				return nil
+			}
+
+			// SQLite mode - reset in-progress tasks
 			_, store, err := requireProject()
 			if err != nil {
 				return err
 			}
 			defer store.Close()
 
-			// TODO: Implement DBOS workflow recovery
-			fmt.Println("🐂 Resuming workflows...")
+			fmt.Println("🐂 Resuming SQLite-based workflows...")
 
 			// Check for incomplete workflows
 			status, err := store.GetProjectStatus()
@@ -314,12 +435,27 @@ func resumeCmd() *cobra.Command {
 				return err
 			}
 
-			if status.InProgress == 0 {
+			incomplete := status.InProgress + status.Claimed
+			if incomplete == 0 {
 				fmt.Println("No incomplete workflows found")
 				return nil
 			}
 
-			fmt.Printf("Found %d incomplete tasks\n", status.InProgress)
+			fmt.Printf("Found %d incomplete tasks (in_progress: %d, claimed: %d)\n",
+				incomplete, status.InProgress, status.Claimed)
+
+			// Reset in-progress and claimed tasks back to ready
+			count, err := store.ResetTasks([]types.TaskStatus{
+				types.TaskStatusInProgress,
+				types.TaskStatusClaimed,
+			})
+			if err != nil {
+				return fmt.Errorf("resetting tasks: %w", err)
+			}
+
+			fmt.Printf("✅ Reset %d tasks to ready status\n", count)
+			fmt.Println("\nYou can now run:")
+			fmt.Println("  drover run")
 			return nil
 		},
 	}

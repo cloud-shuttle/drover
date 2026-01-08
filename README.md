@@ -6,6 +6,15 @@ Drover is a durable workflow orchestrator that runs multiple Claude Code agents 
 
 > *"No task left behind."*
 
+## Workflow Engine
+
+Drover uses **DBOS (Durable Operating System for Workflows)** as its primary workflow engine:
+
+- **Development**: SQLite-based orchestration (zero setup, works out of the box)
+- **Production**: DBOS with PostgreSQL (set `DBOS_SYSTEM_DATABASE_URL`)
+
+Both modes provide durable execution, automatic retries, and crash recovery.
+
 ## Why Drover?
 
 You have a project with dozens of tasks. Running them one at a time is slow. Running them manually in parallel is chaotic. Drover solves this by:
