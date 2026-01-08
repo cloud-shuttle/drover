@@ -543,3 +543,58 @@ func (s *Store) GetBlockedBy(taskID string) ([]string, error) {
 
 	return blockedBy, nil
 }
+
+// ListEpics returns all epics in the database
+func (s *Store) ListEpics() ([]*types.Epic, error) {
+	rows, err := s.DB.Query(`
+		SELECT id, title, COALESCE(description, ''), status, created_at
+		FROM epics
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying epics: %w", err)
+	}
+	defer rows.Close()
+
+	var epics []*types.Epic
+	for rows.Next() {
+		var epic types.Epic
+		var description sql.NullString
+
+		err := rows.Scan(
+			&epic.ID, &epic.Title, &description, &epic.Status, &epic.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scanning epic: %w", err)
+		}
+
+		epic.Description = description.String
+		epics = append(epics, &epic)
+	}
+
+	return epics, nil
+}
+
+// ListAllDependencies returns all task dependencies in the database
+func (s *Store) ListAllDependencies() ([]types.TaskDependency, error) {
+	rows, err := s.DB.Query(`
+		SELECT task_id, blocked_by
+		FROM task_dependencies
+		ORDER BY task_id, blocked_by
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying dependencies: %w", err)
+	}
+	defer rows.Close()
+
+	var deps []types.TaskDependency
+	for rows.Next() {
+		var dep types.TaskDependency
+		if err := rows.Scan(&dep.TaskID, &dep.BlockedBy); err != nil {
+			return nil, fmt.Errorf("scanning dependency: %w", err)
+		}
+		deps = append(deps, dep)
+	}
+
+	return deps, nil
+}

@@ -31,6 +31,9 @@ type Config struct {
 	// Claude settings
 	ClaudePath string
 
+	// Beads sync settings
+	AutoSyncBeads bool
+
 	// Project directory (detected)
 	ProjectDir string
 
@@ -51,6 +54,7 @@ func Load() (*Config, error) {
 		AutoUnblock:     true,
 		WorktreeDir:     ".drover/worktrees",
 		ClaudePath:      "claude",
+		AutoSyncBeads:   false, // Default to off for backwards compatibility
 	}
 
 	// Environment overrides
@@ -62,6 +66,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DROVER_TASK_TIMEOUT"); v != "" {
 		cfg.TaskTimeout = parseDurationOrDefault(v, 10*time.Minute)
+	}
+	if v := os.Getenv("DROVER_AUTO_SYNC_BEADS"); v != "" {
+		cfg.AutoSyncBeads = v == "true" || v == "1"
 	}
 
 	return cfg, nil

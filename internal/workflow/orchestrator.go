@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/beads"
 	"github.com/cloud-shuttle/drover/internal/config"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/executor"
@@ -25,6 +26,7 @@ type Orchestrator struct {
 	executor        *executor.Executor
 	workers         int
 	verbose         bool // Enable verbose logging
+	projectDir      string // Project directory for beads sync
 }
 
 // NewOrchestrator creates a new workflow orchestrator
@@ -44,12 +46,13 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 	}
 
 	return &Orchestrator{
-		config:   cfg,
-		store:    store,
-		git:      gitMgr,
-		executor: exec,
-		workers:  cfg.Workers,
-		verbose:  cfg.Verbose,
+		config:     cfg,
+		store:      store,
+		git:        gitMgr,
+		executor:   exec,
+		workers:    cfg.Workers,
+		verbose:    cfg.Verbose,
+		projectDir: projectDir,
 	}, nil
 }
 
@@ -74,6 +77,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 			log.Println("🛑 Context cancelled, stopping...")
 			wg.Wait()
 			_ = o.git.Cleanup() // Clean up any remaining worktrees
+			o.syncToBeadsIfNeeded()
 			return ctx.Err()
 
 		case <-ticker.C:
@@ -90,6 +94,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 				log.Println("✅ All tasks complete!")
 				wg.Wait()
 				o.printFinalStatus(status)
+				o.syncToBeadsIfNeeded()
 				return nil
 			}
 
@@ -283,4 +288,56 @@ func (o *Orchestrator) printFinalStatus(status *db.ProjectStatus) {
 		fmt.Println("\n\n⚠️  Some tasks did not complete successfully")
 		fmt.Println("   Run 'drover status' for details")
 	}
+}
+
+// syncToBeadsIfNeeded exports the current state to beads format if auto-sync is enabled
+func (o *Orchestrator) syncToBeadsIfNeeded() {
+	if !o.config.AutoSyncBeads {
+		return
+	}
+
+	log.Println("📦 Syncing to beads format...")
+
+	// Get all data from the store
+	taskList, err := o.store.ListTasks()
+	if err != nil {
+		log.Printf("Error listing tasks for beads sync: %v", err)
+		return
+	}
+
+	epicList, err := o.store.ListEpics()
+	if err != nil {
+		log.Printf("Error listing epics for beads sync: %v", err)
+		return
+	}
+
+	deps, err := o.store.ListAllDependencies()
+	if err != nil {
+		log.Printf("Error listing dependencies for beads sync: %v", err)
+		return
+	}
+
+	// Convert tasks from pointers to values
+	tasks := make([]types.Task, len(taskList))
+	for i, t := range taskList {
+		tasks[i] = *t
+	}
+
+	// Convert epics from pointers to values
+	epics := make([]types.Epic, len(epicList))
+	for i, e := range epicList {
+		epics[i] = *e
+	}
+
+	// Create beads sync config
+	syncConfig := beads.DefaultSyncConfig(o.projectDir)
+	syncConfig.AutoSync = true
+
+	// Export to beads
+	if err := beads.ExportToBeads(epics, tasks, deps, syncConfig); err != nil {
+		log.Printf("Error exporting to beads: %v", err)
+		return
+	}
+
+	log.Println("✅ Synced to beads format (.beads/beads.jsonl)")
 }
