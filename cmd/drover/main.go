@@ -39,6 +39,7 @@ handles failures gracefully, and guarantees progress through crashes and restart
 		resumeCmd(),
 		resetCmd(),
 		exportCmd(),
+		dbosDemoCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

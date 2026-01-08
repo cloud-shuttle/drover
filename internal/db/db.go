@@ -233,6 +233,9 @@ func (s *Store) GetProjectStatus() (*ProjectStatus, error) {
 }
 
 // ClaimTask attempts to atomically claim a ready task
+//
+// Uses UPDATE with ORDER BY and LIMIT to atomically find and claim a task
+// in a single operation, avoiding race conditions between SELECT and UPDATE.
 func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -240,45 +243,39 @@ func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
 	}
 	defer tx.Rollback()
 
-	// Find and claim a ready task (highest priority first)
+	now := time.Now().Unix()
+
+	// Atomically find and claim a ready task (highest priority first)
+	// by using UPDATE with ORDER BY and LIMIT. This ensures that even if
+	// multiple workers execute this concurrently, each will claim a different
+	// task or none at all, without any race condition.
 	var task types.Task
 	err = tx.QueryRow(`
-		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
-		       priority, status, attempts, max_attempts, created_at, updated_at
-		FROM tasks
-		WHERE status = 'ready'
-		ORDER BY priority DESC, created_at ASC
-		LIMIT 1
-	`).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
+		UPDATE tasks
+		SET status = 'claimed',
+		    claimed_by = ?,
+		    claimed_at = ?,
+		    updated_at = ?
+		WHERE id = (
+			SELECT id FROM tasks
+			WHERE status = 'ready'
+			ORDER BY priority DESC, created_at ASC
+			LIMIT 1
+		)
+		RETURNING id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+		          priority, status, attempts, max_attempts, created_at, updated_at
+	`, workerID, now, now).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
 		&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
 		&task.CreatedAt, &task.UpdatedAt)
 
 	if err == sql.ErrNoRows {
-		return nil, nil // No tasks available
+		// No tasks were claimed - either no ready tasks exist, or another worker
+		// claimed the last ready task between our subquery read and the UPDATE.
+		// Either way, returning nil is the correct behavior.
+		return nil, nil
 	}
-	if err != nil {
-		return nil, fmt.Errorf("querying task: %w", err)
-	}
-
-	// Claim the task (with race condition check)
-	now := time.Now().Unix()
-	result, err := tx.Exec(`
-		UPDATE tasks
-		SET status = 'claimed', claimed_by = ?, claimed_at = ?, updated_at = ?
-		WHERE id = ? AND status = 'ready'
-	`, workerID, now, now, task.ID)
 	if err != nil {
 		return nil, fmt.Errorf("claiming task: %w", err)
-	}
-
-	// Check if the task was still available when we tried to claim it
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("checking affected rows: %w", err)
-	}
-	if rowsAffected == 0 {
-		// Task was claimed by another worker between SELECT and UPDATE
-		return nil, nil
 	}
 
 	task.Status = types.TaskStatusClaimed

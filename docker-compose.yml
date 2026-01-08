@@ -1,0 +1,31 @@
+# Docker Compose configuration for Drover DBOS demo
+# This sets up PostgreSQL for DBOS workflow execution
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: drover-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: drover
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - drover-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  drover-network:
+    driver: bridge

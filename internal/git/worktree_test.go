@@ -176,9 +176,12 @@ func TestWorktreeManager_Commit_WithChanges(t *testing.T) {
 
 	// Commit changes
 	commitMsg := "test commit"
-	err = wm.Commit(task.ID, commitMsg)
+	hasChanges, err := wm.Commit(task.ID, commitMsg)
 	if err != nil {
 		t.Fatalf("Failed to commit: %v", err)
+	}
+	if !hasChanges {
+		t.Fatal("Expected hasChanges to be true when we made changes")
 	}
 
 	// Verify commit was created
@@ -212,9 +215,12 @@ func TestWorktreeManager_Commit_NoChanges(t *testing.T) {
 
 	// Don't make any changes - commit should succeed anyway
 	commitMsg := "test commit"
-	err = wm.Commit(task.ID, commitMsg)
+	hasChanges, err := wm.Commit(task.ID, commitMsg)
 	if err != nil {
 		t.Fatalf("Commit with no changes should succeed, got: %v", err)
+	}
+	if hasChanges {
+		t.Error("Expected hasChanges to be false when no changes were made")
 	}
 
 	// Verify no new commit was created
@@ -255,7 +261,7 @@ func TestWorktreeManager_MergeToMain_WithChanges(t *testing.T) {
 	}
 
 	commitMsg := "test commit for merge"
-	err = wm.Commit(task.ID, commitMsg)
+	_, err = wm.Commit(task.ID, commitMsg)
 	if err != nil {
 		t.Fatalf("Failed to commit: %v", err)
 	}
