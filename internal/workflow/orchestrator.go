@@ -148,6 +148,7 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	defer func() {
 		if !taskCompleted {
 			// Only mark as failed if task is still in_progress (i.e., error handler didn't run)
+			// Don't mark as failed if task was set to ready for retry
 			status, err := o.store.GetTaskStatus(task.ID)
 			if err == nil && status == types.TaskStatusInProgress {
 				log.Printf("⚠️  Task %s still in_progress at exit, marking as failed", task.ID)
@@ -160,7 +161,9 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	worktreePath, err := o.git.Create(task)
 	if err != nil {
 		log.Printf("❌ Task %s failed: creating worktree: %v", task.ID, err)
-		o.handleTaskFailure(task.ID, err.Error())
+		if o.handleTaskFailure(task.ID, err.Error()) {
+			taskCompleted = true // Task set to ready for retry
+		}
 		return
 	}
 	defer o.git.Remove(task.ID)
@@ -169,7 +172,9 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	result := o.executor.ExecuteWithTimeout(worktreePath, task)
 	if !result.Success {
 		log.Printf("❌ Task %s failed: claude execution: %v", task.ID, result.Error)
-		o.handleTaskFailure(task.ID, result.Error.Error())
+		if o.handleTaskFailure(task.ID, result.Error.Error()) {
+			taskCompleted = true // Task set to ready for retry
+		}
 		return
 	}
 
@@ -181,7 +186,9 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	hasChanges, err := o.git.Commit(task.ID, commitMsg)
 	if err != nil {
 		log.Printf("❌ Task %s failed: committing: %v", task.ID, err)
-		o.handleTaskFailure(task.ID, err.Error())
+		if o.handleTaskFailure(task.ID, err.Error()) {
+			taskCompleted = true // Task set to ready for retry
+		}
 		return
 	}
 
@@ -216,32 +223,34 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 }
 
 // handleTaskFailure increments attempts and either retries or marks as failed
-func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) {
+// Returns true if the task was set to ready for retry (false if permanently failed)
+func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 	// Fetch current task to check attempts before incrementing
 	task, err := o.store.GetTask(taskID)
 	if err != nil {
 		log.Printf("Error fetching task %s: %v", taskID, err)
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
-		return
+		return false
 	}
 
 	// Check if we've exceeded max attempts
 	if task.Attempts >= task.MaxAttempts {
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
 		log.Printf("❌ Task %s failed after %d attempts", taskID, task.Attempts)
-		return
+		return false
 	}
 
 	// Increment attempts in database
 	if err := o.store.IncrementTaskAttempts(taskID); err != nil {
 		log.Printf("Error incrementing attempts for task %s: %v", taskID, err)
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
-		return
+		return false
 	}
 
 	// Allow retry - task.Attempts is now incremented
 	_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusReady, errorMsg)
 	log.Printf("🔄 Task %s retrying (attempt %d/%d)", taskID, task.Attempts+1, task.MaxAttempts)
+	return true
 }
 
 // printProgress prints current progress

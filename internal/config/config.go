@@ -42,8 +42,8 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		DatabaseURL:     defaultDatabaseURL(),
-		Workers:         4,
-		TaskTimeout:     10 * time.Minute,
+		Workers:         1,
+		TaskTimeout:     60 * time.Minute,
 		MaxTaskAttempts: 3,
 		ClaimTimeout:    5 * time.Minute,
 		StallTimeout:    5 * time.Minute,
