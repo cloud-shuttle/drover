@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/config"
+	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/pkg/types"
@@ -62,13 +63,14 @@ type DBOSOrchestrator struct {
 	executor       *executor.Executor
 	dbosCtx        dbos.DBOSContext
 	queue          dbos.WorkflowQueue
+	store          *db.Store // SQLite store for worktree tracking
 	verbose        bool
 	dependencyMap  map[string][]string // taskID -> list of dependent task IDs
 	dependencyMu   sync.RWMutex
 }
 
 // NewDBOSOrchestrator creates a new DBOS-based orchestrator
-func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDir string) (*DBOSOrchestrator, error) {
+func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDir string, store *db.Store) (*DBOSOrchestrator, error) {
 	gitMgr := git.NewWorktreeManager(
 		projectDir,
 		filepath.Join(projectDir, cfg.WorktreeDir),
@@ -95,6 +97,7 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 		executor:      exec,
 		dbosCtx:       dbosCtx,
 		queue:         queue,
+		store:         store,
 		verbose:       cfg.Verbose,
 		dependencyMap: make(map[string][]string),
 	}, nil
@@ -428,6 +431,14 @@ func (o *DBOSOrchestrator) createWorktreeStep(ctx context.Context, task TaskInpu
 		return "", fmt.Errorf("creating worktree: %w", err)
 	}
 
+	// Track worktree in database
+	branchName := fmt.Sprintf("drover-%s", task.TaskID)
+	if o.store != nil {
+		if err := o.store.CreateWorktree(task.TaskID, worktreePath, branchName); err != nil {
+			log.Printf("⚠️  Failed to track worktree in database: %v", err)
+		}
+	}
+
 	return worktreePath, nil
 }
 
@@ -485,6 +496,15 @@ func (o *DBOSOrchestrator) mergeToMainStep(ctx context.Context, taskID string) (
 	// Clean up worktree after successful merge
 	if err := o.git.Remove(taskID); err != nil {
 		log.Printf("⚠️  Failed to clean up worktree for task %s: %v", taskID, err)
+	}
+
+	// Mark worktree as removed in database
+	if o.store != nil {
+		if err := o.store.UpdateWorktreeStatus(taskID, "merged"); err != nil {
+			log.Printf("⚠️  Failed to update worktree status in database: %v", err)
+		}
+		// Delete the worktree record since it's been cleaned up
+		o.store.DeleteWorktree(taskID)
 	}
 
 	return true, nil

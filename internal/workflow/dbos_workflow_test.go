@@ -84,7 +84,8 @@ func setupDBOSTestEnvironment(t *testing.T) (string, dbos.DBOSContext, *workflow
 	}
 
 	// Create DBOS orchestrator
-	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, tmpDir)
+	// Note: Tests pass nil for store since they don't need worktree tracking
+	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, tmpDir, nil)
 	if err != nil {
 		dbos.Shutdown(dbosCtx, 5*time.Second)
 		t.Fatalf("Failed to create DBOS orchestrator: %v", err)
@@ -479,7 +480,7 @@ func TestDBOSOrchestrator_TaskFailure(t *testing.T) {
 	}
 
 	// Create DBOS orchestrator
-	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx2, tmpDir)
+	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx2, tmpDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}
@@ -569,7 +570,7 @@ func TestDBOSOrchestrator_TaskRetry(t *testing.T) {
 	}
 
 	// Create DBOS orchestrator
-	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx2, tmpDir)
+	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx2, tmpDir, nil)
 	if err != nil {
 		t.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}
@@ -667,7 +668,7 @@ func BenchmarkDBOS_Sequential(b *testing.B) {
 		Verbose:      false,
 	}
 
-	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, tmpDir)
+	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, tmpDir, nil)
 	if err != nil {
 		b.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}
@@ -739,7 +740,7 @@ func BenchmarkDBOS_Queue(b *testing.B) {
 		Verbose:      false,
 	}
 
-	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, tmpDir)
+	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, tmpDir, nil)
 	if err != nil {
 		b.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}

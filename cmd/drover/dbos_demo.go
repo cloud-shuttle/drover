@@ -56,7 +56,8 @@ Note: This requires PostgreSQL to be running and DBOS_SYSTEM_DATABASE_URL to be 
 			}
 
 			// Create DBOS orchestrator BEFORE launching DBOS (so queues can be registered)
-			orchestrator, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, projectDir)
+			// Note: Passing nil for store since this is a demo without a full project
+			orchestrator, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, projectDir, nil)
 			if err != nil {
 				return fmt.Errorf("failed to create orchestrator: %w", err)
 			}

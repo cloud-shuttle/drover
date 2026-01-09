@@ -4,6 +4,8 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -96,11 +98,25 @@ func (s *Store) InitSchema() error {
 		FOREIGN KEY (blocked_by) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 
+	-- Worktrees track git worktree lifecycle for cleanup
+	CREATE TABLE IF NOT EXISTS worktrees (
+		task_id TEXT PRIMARY KEY,
+		path TEXT NOT NULL,
+		branch TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		last_used_at INTEGER NOT NULL,
+		status TEXT DEFAULT 'active',
+		disk_size INTEGER DEFAULT 0,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
 	-- Indexes for common queries
 	CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 	CREATE INDEX IF NOT EXISTS idx_tasks_epic ON tasks(epic_id);
 	CREATE INDEX IF NOT EXISTS idx_tasks_priority ON tasks(priority DESC);
 	CREATE INDEX IF NOT EXISTS idx_dependencies_blocked_by ON task_dependencies(blocked_by);
+	CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status);
+	CREATE INDEX IF NOT EXISTS idx_worktrees_created ON worktrees(created_at);
 	`
 
 	_, err := s.DB.Exec(schema)
@@ -597,4 +613,293 @@ func (s *Store) ListAllDependencies() ([]types.TaskDependency, error) {
 	}
 
 	return deps, nil
+}
+
+// WorktreeInfo represents a worktree with its metadata
+type WorktreeInfo struct {
+	TaskID      string
+	Path        string
+	Branch      string
+	CreatedAt   int64
+	LastUsedAt  int64
+	Status      string
+	DiskSize    int64
+	TaskStatus  string
+	TaskTitle   string
+}
+
+// CreateWorktree records a new worktree in the database
+func (s *Store) CreateWorktree(taskID, path, branch string) error {
+	now := time.Now().Unix()
+	_, err := s.DB.Exec(`
+		INSERT INTO worktrees (task_id, path, branch, created_at, last_used_at, status)
+		VALUES (?, ?, ?, ?, ?, 'active')
+	`, taskID, path, branch, now, now)
+	if err != nil {
+		return fmt.Errorf("creating worktree record: %w", err)
+	}
+	return nil
+}
+
+// UpdateWorktreeStatus updates the status of a worktree
+func (s *Store) UpdateWorktreeStatus(taskID, status string) error {
+	now := time.Now().Unix()
+	_, err := s.DB.Exec(`
+		UPDATE worktrees
+		SET status = ?, last_used_at = ?
+		WHERE task_id = ?
+	`, status, now, taskID)
+	if err != nil {
+		return fmt.Errorf("updating worktree status: %w", err)
+	}
+	return nil
+}
+
+// UpdateWorktreeDiskSize updates the disk size of a worktree
+func (s *Store) UpdateWorktreeDiskSize(taskID string, size int64) error {
+	_, err := s.DB.Exec(`
+		UPDATE worktrees
+		SET disk_size = ?
+		WHERE task_id = ?
+	`, size, taskID)
+	if err != nil {
+		return fmt.Errorf("updating worktree disk size: %w", err)
+	}
+	return nil
+}
+
+// TouchWorktree updates the last_used_at timestamp
+func (s *Store) TouchWorktree(taskID string) error {
+	now := time.Now().Unix()
+	_, err := s.DB.Exec(`
+		UPDATE worktrees
+		SET last_used_at = ?
+		WHERE task_id = ?
+	`, now, taskID)
+	if err != nil {
+		return fmt.Errorf("touching worktree: %w", err)
+	}
+	return nil
+}
+
+// ListWorktrees returns all worktrees with their task information
+func (s *Store) ListWorktrees() ([]*WorktreeInfo, error) {
+	// Try to query with task information (LEFT JOIN with tasks table)
+	rows, err := s.DB.Query(`
+		SELECT w.task_id, w.path, w.branch, w.created_at, w.last_used_at,
+		       w.status, w.disk_size, COALESCE(t.status, ''), COALESCE(t.title, '')
+		FROM worktrees w
+		LEFT JOIN tasks t ON w.task_id = t.id
+		ORDER BY w.created_at DESC
+	`)
+
+	// If the tasks table doesn't exist (DBOS mode), fall back to simpler query
+	if err != nil {
+		rows, err = s.DB.Query(`
+			SELECT task_id, path, branch, created_at, last_used_at, status, disk_size
+			FROM worktrees
+			ORDER BY created_at DESC
+		`)
+		if err != nil {
+			return nil, fmt.Errorf("querying worktrees: %w", err)
+		}
+		defer rows.Close()
+
+		var worktrees []*WorktreeInfo
+		for rows.Next() {
+			var w WorktreeInfo
+			err := rows.Scan(
+				&w.TaskID, &w.Path, &w.Branch, &w.CreatedAt, &w.LastUsedAt,
+				&w.Status, &w.DiskSize,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("scanning worktree: %w", err)
+			}
+			worktrees = append(worktrees, &w)
+		}
+		return worktrees, nil
+	}
+	defer rows.Close()
+
+	var worktrees []*WorktreeInfo
+	for rows.Next() {
+		var w WorktreeInfo
+		err := rows.Scan(
+			&w.TaskID, &w.Path, &w.Branch, &w.CreatedAt, &w.LastUsedAt,
+			&w.Status, &w.DiskSize, &w.TaskStatus, &w.TaskTitle,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scanning worktree: %w", err)
+		}
+		worktrees = append(worktrees, &w)
+	}
+
+	return worktrees, nil
+}
+
+// GetWorktreesForCleanup returns worktrees that can be cleaned up
+func (s *Store) GetWorktreesForCleanup(completedOnly bool) ([]*WorktreeInfo, error) {
+	var rows *sql.Rows
+	var err error
+
+	if completedOnly {
+		// Only return worktrees for completed tasks
+		rows, err = s.DB.Query(`
+			SELECT w.task_id, w.path, w.branch, w.created_at, w.last_used_at,
+			       w.status, w.disk_size, COALESCE(t.status, ''), COALESCE(t.title, '')
+			FROM worktrees w
+			LEFT JOIN tasks t ON w.task_id = t.id
+			WHERE w.status != 'removed' AND (t.status = 'completed' OR t.status = 'failed')
+			ORDER BY w.created_at ASC
+		`)
+	} else {
+		// Return all worktrees except removed ones
+		rows, err = s.DB.Query(`
+			SELECT w.task_id, w.path, w.branch, w.created_at, w.last_used_at,
+			       w.status, w.disk_size, COALESCE(t.status, ''), COALESCE(t.title, '')
+			FROM worktrees w
+			LEFT JOIN tasks t ON w.task_id = t.id
+			WHERE w.status != 'removed'
+			ORDER BY w.created_at ASC
+		`)
+	}
+
+	// If the tasks table doesn't exist (DBOS mode), fall back to simpler query
+	if err != nil {
+		if completedOnly {
+			// In DBOS mode without task status, just return all active worktrees
+			// The user will need to manually select which to clean up
+			rows, err = s.DB.Query(`
+				SELECT task_id, path, branch, created_at, last_used_at, status, disk_size
+				FROM worktrees
+				WHERE status != 'removed'
+				ORDER BY created_at ASC
+			`)
+		} else {
+			rows, err = s.DB.Query(`
+				SELECT task_id, path, branch, created_at, last_used_at, status, disk_size
+				FROM worktrees
+				WHERE status != 'removed'
+				ORDER BY created_at ASC
+			`)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("querying worktrees for cleanup: %w", err)
+		}
+		defer rows.Close()
+
+		var worktrees []*WorktreeInfo
+		for rows.Next() {
+			var w WorktreeInfo
+			err := rows.Scan(
+				&w.TaskID, &w.Path, &w.Branch, &w.CreatedAt, &w.LastUsedAt,
+				&w.Status, &w.DiskSize,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("scanning worktree: %w", err)
+			}
+			worktrees = append(worktrees, &w)
+		}
+		return worktrees, nil
+	}
+	defer rows.Close()
+
+	var worktrees []*WorktreeInfo
+	for rows.Next() {
+		var w WorktreeInfo
+		err := rows.Scan(
+			&w.TaskID, &w.Path, &w.Branch, &w.CreatedAt, &w.LastUsedAt,
+			&w.Status, &w.DiskSize, &w.TaskStatus, &w.TaskTitle,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scanning worktree: %w", err)
+		}
+		worktrees = append(worktrees, &w)
+	}
+
+	return worktrees, nil
+}
+
+// DeleteWorktree removes a worktree record from the database
+func (s *Store) DeleteWorktree(taskID string) error {
+	_, err := s.DB.Exec(`
+		DELETE FROM worktrees WHERE task_id = ?
+	`, taskID)
+	if err != nil {
+		return fmt.Errorf("deleting worktree record: %w", err)
+	}
+	return nil
+}
+
+// GetOrphanedWorktrees returns worktrees that exist on disk but not in the database
+// or have no corresponding task (task was deleted)
+func (s *Store) GetOrphanedWorktrees(worktreeDir string) ([]string, error) {
+	// Get all task IDs that have worktrees
+	rows, err := s.DB.Query(`
+		SELECT task_id FROM worktrees WHERE status != 'removed'
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying active worktrees: %w", err)
+	}
+	defer rows.Close()
+
+	activeTaskIDs := make(map[string]bool)
+	for rows.Next() {
+		var taskID string
+		if err := rows.Scan(&taskID); err != nil {
+			continue
+		}
+		activeTaskIDs[taskID] = true
+	}
+
+	// Check what directories exist on disk
+	entries, err := os.ReadDir(worktreeDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("reading worktree directory: %w", err)
+	}
+
+	var orphaned []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		taskID := entry.Name()
+		// Skip if it's an active worktree in the database
+		if activeTaskIDs[taskID] {
+			continue
+		}
+		orphaned = append(orphaned, filepath.Join(worktreeDir, taskID))
+	}
+
+	return orphaned, nil
+}
+
+// GetWorktreeStats returns statistics about worktrees
+func (s *Store) GetWorktreeStats() (map[string]int64, error) {
+	stats := make(map[string]int64)
+
+	// Count by status
+	rows, err := s.DB.Query(`
+		SELECT status, COUNT(*), COALESCE(SUM(disk_size), 0) FROM worktrees GROUP BY status
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying worktree stats: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status string
+		var count int64
+		var totalSize int64
+		if err := rows.Scan(&status, &count, &totalSize); err != nil {
+			continue
+		}
+		stats[status+"_count"] = count
+		stats[status+"_size"] = totalSize
+	}
+
+	return stats, nil
 }
