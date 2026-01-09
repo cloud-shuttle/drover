@@ -253,6 +253,15 @@ func (s *Store) GetProjectStatus() (*ProjectStatus, error) {
 // Uses UPDATE with ORDER BY and LIMIT to atomically find and claim a task
 // in a single operation, avoiding race conditions between SELECT and UPDATE.
 func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
+	return s.ClaimTaskForEpic(workerID, "")
+}
+
+// ClaimTaskForEpic attempts to atomically claim a ready task, optionally filtered by epic
+//
+// Uses UPDATE with ORDER BY and LIMIT to atomically find and claim a task
+// in a single operation, avoiding race conditions between SELECT and UPDATE.
+// If epicID is empty, claims any ready task. If epicID is set, only claims tasks in that epic.
+func (s *Store) ClaimTaskForEpic(workerID, epicID string) (*types.Task, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, err
@@ -261,28 +270,47 @@ func (s *Store) ClaimTask(workerID string) (*types.Task, error) {
 
 	now := time.Now().Unix()
 
-	// Atomically find and claim a ready task (highest priority first)
-	// by using UPDATE with ORDER BY and LIMIT. This ensures that even if
-	// multiple workers execute this concurrently, each will claim a different
-	// task or none at all, without any race condition.
+	// Build the query with optional epic filtering
 	var task types.Task
-	err = tx.QueryRow(`
-		UPDATE tasks
-		SET status = 'claimed',
-		    claimed_by = ?,
-		    claimed_at = ?,
-		    updated_at = ?
-		WHERE id = (
-			SELECT id FROM tasks
-			WHERE status = 'ready'
-			ORDER BY priority DESC, created_at ASC
-			LIMIT 1
-		)
-		RETURNING id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
-		          priority, status, attempts, max_attempts, created_at, updated_at
-	`, workerID, now, now).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
-		&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-		&task.CreatedAt, &task.UpdatedAt)
+	if epicID != "" {
+		// Filter by epic_id
+		err = tx.QueryRow(`
+			UPDATE tasks
+			SET status = 'claimed',
+			    claimed_by = ?,
+			    claimed_at = ?,
+			    updated_at = ?
+			WHERE id = (
+				SELECT id FROM tasks
+				WHERE status = 'ready' AND epic_id = ?
+				ORDER BY priority DESC, created_at ASC
+				LIMIT 1
+			)
+			RETURNING id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+			          priority, status, attempts, max_attempts, created_at, updated_at
+		`, workerID, now, now, epicID).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
+			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
+			&task.CreatedAt, &task.UpdatedAt)
+	} else {
+		// No epic filtering
+		err = tx.QueryRow(`
+			UPDATE tasks
+			SET status = 'claimed',
+			    claimed_by = ?,
+			    claimed_at = ?,
+			    updated_at = ?
+			WHERE id = (
+				SELECT id FROM tasks
+				WHERE status = 'ready'
+				ORDER BY priority DESC, created_at ASC
+				LIMIT 1
+			)
+			RETURNING id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+			          priority, status, attempts, max_attempts, created_at, updated_at
+		`, workerID, now, now).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
+			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
+			&task.CreatedAt, &task.UpdatedAt)
+	}
 
 	if err == sql.ErrNoRows {
 		// No tasks were claimed - either no ready tasks exist, or another worker
@@ -489,14 +517,38 @@ func generateID(prefix string) string {
 
 // ListTasks returns all tasks in the database
 func (s *Store) ListTasks() ([]*types.Task, error) {
-	rows, err := s.DB.Query(`
-		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
-		       priority, status, attempts, max_attempts,
-		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-		       created_at, updated_at
-		FROM tasks
-		ORDER BY created_at ASC
-	`)
+	return s.ListTasksByEpic("")
+}
+
+// ListTasksByEpic returns tasks filtered by epic ID
+// If epicID is empty, returns all tasks
+func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
+	var rows *sql.Rows
+	var err error
+
+	if epicID != "" {
+		// Filter by epic ID
+		rows, err = s.DB.Query(`
+			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+			       priority, status, attempts, max_attempts,
+			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
+			       created_at, updated_at
+			FROM tasks
+			WHERE epic_id = ?
+			ORDER BY created_at ASC
+		`, epicID)
+	} else {
+		// Return all tasks
+		rows, err = s.DB.Query(`
+			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+			       priority, status, attempts, max_attempts,
+			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
+			       created_at, updated_at
+			FROM tasks
+			ORDER BY created_at ASC
+		`)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("querying tasks: %w", err)
 	}

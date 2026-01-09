@@ -32,6 +32,7 @@ type Orchestrator struct {
 	workers         int
 	verbose         bool // Enable verbose logging
 	projectDir      string // Project directory for beads sync
+	epicID          string // Optional epic filter for task execution
 }
 
 // NewOrchestrator creates a new workflow orchestrator
@@ -61,9 +62,18 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 	}, nil
 }
 
+// SetEpicFilter sets the epic filter for task execution
+// Only tasks belonging to the specified epic will be executed
+func (o *Orchestrator) SetEpicFilter(epicID string) {
+	o.epicID = epicID
+}
+
 // Run executes all tasks to completion
 func (o *Orchestrator) Run(ctx context.Context) error {
 	log.Printf("🐂 Starting Drover with %d workers", o.workers)
+	if o.epicID != "" {
+		log.Printf("🎯 Filtering to epic: %s", o.epicID)
+	}
 
 	// Start workers - they will claim tasks independently
 	var wg sync.WaitGroup
@@ -121,9 +131,9 @@ func (o *Orchestrator) worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 			log.Printf("👷 Worker %d stopping (context cancelled)", id)
 			return
 		default:
-			// Try to claim a task
+			// Try to claim a task (filtered by epic if set)
 			workerID := fmt.Sprintf("worker-%d-%d", id, time.Now().UnixNano())
-			task, err := o.store.ClaimTask(workerID)
+			task, err := o.store.ClaimTaskForEpic(workerID, o.epicID)
 			if err != nil {
 				log.Printf("Worker %d: error claiming task: %v", id, err)
 				time.Sleep(time.Second)

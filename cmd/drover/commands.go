@@ -147,24 +147,29 @@ DBOS Workflow Engine:
 
 			if dbosURL != "" {
 				// Use DBOS orchestrator for production
-				return runWithDBOS(cmd, &runCfg, store, projectDir, dbosURL)
+				return runWithDBOS(cmd, &runCfg, store, projectDir, dbosURL, epicID)
 			}
 
 			// Default: Use SQLite-based orchestrator for local development
-			return runWithSQLite(cmd, &runCfg, store, projectDir)
+			return runWithSQLite(cmd, &runCfg, store, projectDir, epicID)
 		},
 	}
 
 	cmd.Flags().IntVarP(&workers, "workers", "w", 0, "Number of parallel workers")
-	cmd.Flags().StringVar(&epicID, "epic", "", "Filter to specific epic (not yet implemented)")
+	cmd.Flags().StringVar(&epicID, "epic", "", "Filter to specific epic")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging for debugging")
 
 	return cmd
 }
 
 // runWithDBOS executes tasks using DBOS workflow engine
-func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, store *db.Store, projectDir, dbosURL string) error {
+func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, store *db.Store, projectDir, dbosURL, epicID string) error {
 	fmt.Println("🐂 Using DBOS workflow engine (PostgreSQL)")
+
+	// Show epic filter if specified
+	if epicID != "" {
+		fmt.Printf("🎯 Filtering to epic: %s\n", epicID)
+	}
 
 	// Initialize DBOS context
 	dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{
@@ -192,8 +197,8 @@ func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, store *db.Store, pro
 	}
 	defer dbos.Shutdown(dbosCtx, 5*time.Second)
 
-	// Get tasks from database
-	tasks, err := store.ListTasks()
+	// Get tasks from database (filtered by epic if specified)
+	tasks, err := store.ListTasksByEpic(epicID)
 	if err != nil {
 		return fmt.Errorf("listing tasks: %w", err)
 	}
@@ -233,13 +238,18 @@ func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, store *db.Store, pro
 	return nil
 }
 
-func runWithSQLite(cmd *cobra.Command, runCfg *config.Config, store *db.Store, projectDir string) error {
+func runWithSQLite(cmd *cobra.Command, runCfg *config.Config, store *db.Store, projectDir, epicID string) error {
 	fmt.Println("🐂 Using SQLite-based orchestrator (local mode)")
 
 	// Create orchestrator
 	orch, err := workflow.NewOrchestrator(runCfg, store, projectDir)
 	if err != nil {
 		return fmt.Errorf("creating orchestrator: %w", err)
+	}
+
+	// Set epic filter if specified
+	if epicID != "" {
+		orch.SetEpicFilter(epicID)
 	}
 
 	// Setup context with cancellation
