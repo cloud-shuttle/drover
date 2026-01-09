@@ -427,6 +427,57 @@ continue from where it left off.`,
 	}
 }
 
+func infoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "info <task-id>",
+		Short: "Show detailed information about a specific task",
+		Long: `Show detailed information about a specific task.
+
+Displays task title, description, status, epic, priority, dependencies,
+and other metadata. Useful for inspecting individual task details.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			taskID := args[0]
+
+			// Get task details
+			task, err := store.GetTask(taskID)
+			if err != nil {
+				return fmt.Errorf("task not found: %s", taskID)
+			}
+
+			// Get dependencies
+			blockedBy, err := store.GetBlockedBy(taskID)
+			if err != nil {
+				blockedBy = nil
+			}
+
+			// Find tasks that depend on this one
+			rows, err := store.DB.Query(`
+				SELECT task_id FROM task_dependencies WHERE blocked_by = ?
+			`, taskID)
+			var blocking []string
+			if err == nil {
+				defer rows.Close()
+				for rows.Next() {
+					var id string
+					if rows.Scan(&id) == nil {
+						blocking = append(blocking, id)
+					}
+				}
+			}
+
+			printTaskInfo(task, blockedBy, blocking)
+			return nil
+		},
+	}
+}
+
 func resetCmd() *cobra.Command {
 	var (
 		resetCompleted bool
@@ -649,6 +700,89 @@ func printProgressBar(percent float64) {
 		}
 	}
 	fmt.Printf("] %.1f%%\n", percent)
+}
+
+func printTaskInfo(task *types.Task, blockedBy, blocking []string) {
+	fmt.Println("\n📋 Task Info")
+	fmt.Println("════════════")
+
+	fmt.Printf("\nID:         %s\n", task.ID)
+	fmt.Printf("Title:      %s\n", task.Title)
+	fmt.Printf("Status:     %s\n", formatTaskStatus(task.Status))
+	fmt.Printf("Priority:   %d\n", task.Priority)
+
+	if task.Description != "" {
+		fmt.Printf("\nDescription:\n")
+		fmt.Printf("  %s\n", task.Description)
+	}
+
+	if task.EpicID != "" {
+		fmt.Printf("\nEpic:       %s\n", task.EpicID)
+	}
+
+	// Timestamps
+	fmt.Printf("\nCreated:    %s\n", formatTimestamp(task.CreatedAt))
+	fmt.Printf("Updated:    %s\n", formatTimestamp(task.UpdatedAt))
+
+	// Attempts
+	if task.Attempts > 0 {
+		fmt.Printf("Attempts:   %d / %d\n", task.Attempts, task.MaxAttempts)
+	}
+
+	// Claim info
+	if task.ClaimedBy != "" {
+		fmt.Printf("Claimed by: %s\n", task.ClaimedBy)
+		if task.ClaimedAt != nil {
+			fmt.Printf("Claimed at: %s\n", formatTimestamp(*task.ClaimedAt))
+		}
+	}
+
+	// Error info
+	if task.LastError != "" {
+		fmt.Printf("\nLast Error:\n")
+		fmt.Printf("  %s\n", task.LastError)
+	}
+
+	// Dependencies
+	if len(blockedBy) > 0 {
+		fmt.Printf("\nBlocked by:\n")
+		for _, id := range blockedBy {
+			fmt.Printf("  • %s\n", id)
+		}
+	}
+
+	if len(blocking) > 0 {
+		fmt.Printf("\nBlocking:\n")
+		for _, id := range blocking {
+			fmt.Printf("  • %s\n", id)
+		}
+	}
+
+	fmt.Println()
+}
+
+func formatTaskStatus(status types.TaskStatus) string {
+	switch status {
+	case types.TaskStatusReady:
+		return "🟢 ready"
+	case types.TaskStatusClaimed:
+		return "🟡 claimed"
+	case types.TaskStatusInProgress:
+		return "🔵 in_progress"
+	case types.TaskStatusBlocked:
+		return "⏸️  blocked"
+	case types.TaskStatusCompleted:
+		return "✅ completed"
+	case types.TaskStatusFailed:
+		return "❌ failed"
+	default:
+		return string(status)
+	}
+}
+
+func formatTimestamp(timestamp int64) string {
+	t := time.Unix(timestamp, 0)
+	return t.Format("2006-01-02 15:04:05")
 }
 
 // worktreeCmd returns the worktree management command

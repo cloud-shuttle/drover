@@ -349,3 +349,143 @@ func TestStore_ClaimTask_AfterFailure(t *testing.T) {
 		t.Error("Expected nil when no ready tasks available, got task")
 	}
 }
+
+func TestStore_GetTask(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	// Create an epic
+	epic, err := store.CreateEpic("Test Epic", "Test Description")
+	if err != nil {
+		t.Fatalf("Failed to create epic: %v", err)
+	}
+
+	// Create a task with full details
+	createdTask, err := store.CreateTask(
+		"Test Task Title",
+		"Test task description with details",
+		epic.ID,
+		42,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Failed to create task: %v", err)
+	}
+
+	// Get the task
+	retrievedTask, err := store.GetTask(createdTask.ID)
+	if err != nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+
+	// Verify all fields match
+	if retrievedTask.ID != createdTask.ID {
+		t.Errorf("Expected ID %s, got %s", createdTask.ID, retrievedTask.ID)
+	}
+
+	if retrievedTask.Title != createdTask.Title {
+		t.Errorf("Expected title %s, got %s", createdTask.Title, retrievedTask.Title)
+	}
+
+	if retrievedTask.Description != createdTask.Description {
+		t.Errorf("Expected description %s, got %s", createdTask.Description, retrievedTask.Description)
+	}
+
+	if retrievedTask.EpicID != epic.ID {
+		t.Errorf("Expected epic ID %s, got %s", epic.ID, retrievedTask.EpicID)
+	}
+
+	if retrievedTask.Priority != 42 {
+		t.Errorf("Expected priority 42, got %d", retrievedTask.Priority)
+	}
+
+	if retrievedTask.Status != types.TaskStatusReady {
+		t.Errorf("Expected status %s, got %s", types.TaskStatusReady, retrievedTask.Status)
+	}
+}
+
+func TestStore_GetTask_NotFound(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	// Try to get a non-existent task
+	_, err := store.GetTask("non-existent-task-id")
+	if err == nil {
+		t.Error("Expected error when getting non-existent task, got nil")
+	}
+}
+
+func TestStore_GetBlockedBy(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	// Create blocker tasks
+	blocker1, err := store.CreateTask("Blocker 1", "", "", 10, nil)
+	if err != nil {
+		t.Fatalf("Failed to create blocker 1: %v", err)
+	}
+
+	blocker2, err := store.CreateTask("Blocker 2", "", "", 10, nil)
+	if err != nil {
+		t.Fatalf("Failed to create blocker 2: %v", err)
+	}
+
+	// Create a task that depends on both blockers
+	dependentTask, err := store.CreateTask(
+		"Dependent Task",
+		"",
+		"",
+		10,
+		[]string{blocker1.ID, blocker2.ID},
+	)
+	if err != nil {
+		t.Fatalf("Failed to create dependent task: %v", err)
+	}
+
+	// Get the blocked by list
+	blockedBy, err := store.GetBlockedBy(dependentTask.ID)
+	if err != nil {
+		t.Fatalf("GetBlockedBy failed: %v", err)
+	}
+
+	// Verify we got both blockers
+	if len(blockedBy) != 2 {
+		t.Fatalf("Expected 2 blockers, got %d", len(blockedBy))
+	}
+
+	// Check that both blocker IDs are present
+	found := make(map[string]bool)
+	for _, id := range blockedBy {
+		found[id] = true
+	}
+
+	if !found[blocker1.ID] {
+		t.Errorf("Expected to find blocker %s", blocker1.ID)
+	}
+
+	if !found[blocker2.ID] {
+		t.Errorf("Expected to find blocker %s", blocker2.ID)
+	}
+}
+
+func TestStore_GetBlockedBy_NoDependencies(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	// Create a task with no dependencies
+	task, err := store.CreateTask("Independent Task", "", "", 10, nil)
+	if err != nil {
+		t.Fatalf("Failed to create task: %v", err)
+	}
+
+	// Get the blocked by list
+	blockedBy, err := store.GetBlockedBy(task.ID)
+	if err != nil {
+		t.Fatalf("GetBlockedBy failed: %v", err)
+	}
+
+	// Verify we got an empty list
+	if len(blockedBy) != 0 {
+		t.Errorf("Expected 0 blockers, got %d", len(blockedBy))
+	}
+}
