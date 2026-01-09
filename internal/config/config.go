@@ -2,6 +2,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,7 +46,7 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		DatabaseURL:     defaultDatabaseURL(),
-		Workers:         1,
+		Workers:         3,
 		TaskTimeout:     60 * time.Minute,
 		MaxTaskAttempts: 3,
 		ClaimTimeout:    5 * time.Minute,
@@ -84,11 +85,17 @@ func defaultDatabaseURL() string {
 }
 
 func parseIntOrDefault(s string, def int) int {
-	// Simple parsing
-	return def
+	var i int
+	if _, err := fmt.Sscanf(s, "%d", &i); err != nil {
+		return def
+	}
+	return i
 }
 
 func parseDurationOrDefault(s string, def time.Duration) time.Duration {
-	// Simple parsing
-	return def
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return def
+	}
+	return d
 }
