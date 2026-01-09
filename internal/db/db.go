@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/cloud-shuttle/drover/pkg/types"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 // Store manages database operations
@@ -31,7 +31,7 @@ type ProjectStatus struct {
 
 // Open opens a SQLite database at the given path
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
