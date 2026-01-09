@@ -68,11 +68,6 @@ func setupDBOSTestEnvironment(t *testing.T) (string, dbos.DBOSContext, *workflow
 		t.Fatalf("Failed to create DBOS context: %v", err)
 	}
 
-	// Launch DBOS runtime
-	if err := dbos.Launch(dbosCtx); err != nil {
-		t.Fatalf("Failed to launch DBOS: %v", err)
-	}
-
 	// Create config
 	cfg := &config.Config{
 		ClaudePath:   mockClaude,
@@ -87,14 +82,18 @@ func setupDBOSTestEnvironment(t *testing.T) (string, dbos.DBOSContext, *workflow
 	// Note: Tests pass nil for store since they don't need worktree tracking
 	orch, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, tmpDir, nil)
 	if err != nil {
-		dbos.Shutdown(dbosCtx, 5*time.Second)
 		t.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}
 
-	// Register workflows
+	// Register workflows (must be before dbos.Launch)
 	if err := orch.RegisterWorkflows(); err != nil {
-		dbos.Shutdown(dbosCtx, 5*time.Second)
 		t.Fatalf("Failed to register workflows: %v", err)
+	}
+
+	// Launch DBOS runtime (must be after queue creation and workflow registration)
+	if err := dbos.Launch(dbosCtx); err != nil {
+		dbos.Shutdown(dbosCtx, 5*time.Second)
+		t.Fatalf("Failed to launch DBOS: %v", err)
 	}
 
 	cleanup := func() {
@@ -464,11 +463,6 @@ func TestDBOSOrchestrator_TaskFailure(t *testing.T) {
 		t.Fatalf("Failed to create DBOS context: %v", err)
 	}
 
-	if err := dbos.Launch(dbosCtx2); err != nil {
-		t.Fatalf("Failed to launch DBOS: %v", err)
-	}
-	defer dbos.Shutdown(dbosCtx2, 5*time.Second)
-
 	// Create config
 	cfg := &config.Config{
 		ClaudePath:   mockClaude,
@@ -485,9 +479,16 @@ func TestDBOSOrchestrator_TaskFailure(t *testing.T) {
 		t.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}
 
+	// Register workflows (must be before dbos.Launch)
 	if err := orch.RegisterWorkflows(); err != nil {
 		t.Fatalf("Failed to register workflows: %v", err)
 	}
+
+	// Launch DBOS runtime (must be after queue creation and workflow registration)
+	if err := dbos.Launch(dbosCtx2); err != nil {
+		t.Fatalf("Failed to launch DBOS: %v", err)
+	}
+	defer dbos.Shutdown(dbosCtx2, 5*time.Second)
 
 	tasks := []workflow.TaskInput{
 		{
@@ -554,11 +555,6 @@ func TestDBOSOrchestrator_TaskRetry(t *testing.T) {
 		t.Fatalf("Failed to create DBOS context: %v", err)
 	}
 
-	if err := dbos.Launch(dbosCtx2); err != nil {
-		t.Fatalf("Failed to launch DBOS: %v", err)
-	}
-	defer dbos.Shutdown(dbosCtx2, 5*time.Second)
-
 	// Create config
 	cfg := &config.Config{
 		ClaudePath:   mockClaude,
@@ -575,9 +571,16 @@ func TestDBOSOrchestrator_TaskRetry(t *testing.T) {
 		t.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}
 
+	// Register workflows (must be before dbos.Launch)
 	if err := orch.RegisterWorkflows(); err != nil {
 		t.Fatalf("Failed to register workflows: %v", err)
 	}
+
+	// Launch DBOS runtime (must be after queue creation and workflow registration)
+	if err := dbos.Launch(dbosCtx2); err != nil {
+		t.Fatalf("Failed to launch DBOS: %v", err)
+	}
+	defer dbos.Shutdown(dbosCtx2, 5*time.Second)
 
 	tasks := []workflow.TaskInput{
 		{
@@ -654,11 +657,6 @@ func BenchmarkDBOS_Sequential(b *testing.B) {
 		b.Fatalf("Failed to create DBOS context: %v", err)
 	}
 
-	if err := dbos.Launch(dbosCtx); err != nil {
-		b.Fatalf("Failed to launch DBOS: %v", err)
-	}
-	defer dbos.Shutdown(dbosCtx, 5*time.Second)
-
 	cfg := &config.Config{
 		ClaudePath:   mockClaude,
 		TaskTimeout:  10 * time.Second,
@@ -673,9 +671,16 @@ func BenchmarkDBOS_Sequential(b *testing.B) {
 		b.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}
 
+	// Register workflows (must be before dbos.Launch)
 	if err := orch.RegisterWorkflows(); err != nil {
 		b.Fatalf("Failed to register workflows: %v", err)
 	}
+
+	// Launch DBOS runtime (must be after queue creation and workflow registration)
+	if err := dbos.Launch(dbosCtx); err != nil {
+		b.Fatalf("Failed to launch DBOS: %v", err)
+	}
+	defer dbos.Shutdown(dbosCtx, 5*time.Second)
 
 	const numTasks = 10
 	tasks := make([]workflow.TaskInput, numTasks)
@@ -726,11 +731,6 @@ func BenchmarkDBOS_Queue(b *testing.B) {
 		b.Fatalf("Failed to create DBOS context: %v", err)
 	}
 
-	if err := dbos.Launch(dbosCtx); err != nil {
-		b.Fatalf("Failed to launch DBOS: %v", err)
-	}
-	defer dbos.Shutdown(dbosCtx, 5*time.Second)
-
 	cfg := &config.Config{
 		ClaudePath:   mockClaude,
 		TaskTimeout:  10 * time.Second,
@@ -745,9 +745,16 @@ func BenchmarkDBOS_Queue(b *testing.B) {
 		b.Fatalf("Failed to create DBOS orchestrator: %v", err)
 	}
 
+	// Register workflows (must be before dbos.Launch)
 	if err := orch.RegisterWorkflows(); err != nil {
 		b.Fatalf("Failed to register workflows: %v", err)
 	}
+
+	// Launch DBOS runtime (must be after queue creation and workflow registration)
+	if err := dbos.Launch(dbosCtx); err != nil {
+		b.Fatalf("Failed to launch DBOS: %v", err)
+	}
+	defer dbos.Shutdown(dbosCtx, 5*time.Second)
 
 	const numTasks = 10
 	tasks := make([]workflow.TaskInput, numTasks)
