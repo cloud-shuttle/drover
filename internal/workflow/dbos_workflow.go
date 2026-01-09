@@ -167,22 +167,15 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input Que
 
 	log.Printf("📋 Enqueuing %d ready tasks (out of %d total)", len(readyTasks), len(tasks))
 
-	// Get the workflow name for ExecuteTaskWorkflow
-	// This must match what DBOS registered it as
-	workflowName := runtime.FuncForPC(reflect.ValueOf(o.ExecuteTaskWorkflow).Pointer()).Name()
-	log.Printf("📋 Workflow name: %s", workflowName)
-
-	// Create a client from the current context for enqueuing
-	// We need a client to enqueue workflows (not RunWorkflow which creates child workflows)
-	client, err := dbos.NewClient(ctx, dbos.ClientConfig{})
-	if err != nil {
-		return QueueStats{}, fmt.Errorf("failed to create client: %w", err)
-	}
-
-	// Enqueue all ready tasks for parallel execution using dbos.Enqueue
+	// Enqueue all ready tasks for parallel execution using RunWorkflow with queue option
+	// Note: We use dbos.RunWorkflow with dbos.WithQueue instead of dbos.Enqueue
+	// because dbos.Enqueue requires a DBOS client which needs database URL that's
+	// not available when called from within a workflow context.
 	handles := make([]dbos.WorkflowHandle[TaskResult], len(readyTasks))
 	for i, task := range readyTasks {
-		handle, err := dbos.Enqueue[TaskInput, TaskResult](client, o.queue.Name, workflowName, task)
+		handle, err := dbos.RunWorkflow(o.dbosCtx, o.ExecuteTaskWorkflow, task,
+			dbos.WithQueue(o.queue.Name),
+		)
 		if err != nil {
 			log.Printf("❌ Failed to enqueue task %s: %v", task.TaskID, err)
 			continue
@@ -194,6 +187,10 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input Que
 	// Wait for all enqueued tasks to complete
 	completed := 0
 	failed := 0
+
+	// Give the queue runner a moment to start processing workflows
+	log.Printf("⏸️  Giving queue runner a moment to start...")
+	time.Sleep(100 * time.Millisecond)
 
 	for _, handle := range handles {
 		log.Printf("⏳ Waiting for task result...")
