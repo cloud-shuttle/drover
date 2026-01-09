@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -82,7 +84,10 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 	}
 
 	// Create a workflow queue for parallel task execution
-	queue := dbos.NewWorkflowQueue(dbosCtx, "drover-tasks")
+	// Use a shorter polling interval for faster task processing
+	queue := dbos.NewWorkflowQueue(dbosCtx, "drover-tasks",
+		dbos.WithQueueBasePollingInterval(10*time.Millisecond), // Poll every 10ms for faster execution
+	)
 
 	return &DBOSOrchestrator{
 		config:        cfg,
@@ -159,10 +164,93 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input Que
 
 	log.Printf("📋 Enqueuing %d ready tasks (out of %d total)", len(readyTasks), len(tasks))
 
+	// Get the workflow name for ExecuteTaskWorkflow
+	// This must match what DBOS registered it as
+	workflowName := runtime.FuncForPC(reflect.ValueOf(o.ExecuteTaskWorkflow).Pointer()).Name()
+	log.Printf("📋 Workflow name: %s", workflowName)
+
+	// Create a client from the current context for enqueuing
+	// We need a client to enqueue workflows (not RunWorkflow which creates child workflows)
+	client, err := dbos.NewClient(ctx, dbos.ClientConfig{})
+	if err != nil {
+		return QueueStats{}, fmt.Errorf("failed to create client: %w", err)
+	}
+
+	// Enqueue all ready tasks for parallel execution using dbos.Enqueue
+	handles := make([]dbos.WorkflowHandle[TaskResult], len(readyTasks))
+	for i, task := range readyTasks {
+		handle, err := dbos.Enqueue[TaskInput, TaskResult](client, o.queue.Name, workflowName, task)
+		if err != nil {
+			log.Printf("❌ Failed to enqueue task %s: %v", task.TaskID, err)
+			continue
+		}
+		handles[i] = handle
+		log.Printf("📤 Enqueued task %s: %s", task.TaskID, task.Title)
+	}
+
+	// Wait for all enqueued tasks to complete
+	completed := 0
+	failed := 0
+
+	for _, handle := range handles {
+		log.Printf("⏳ Waiting for task result...")
+		result, err := handle.GetResult()
+		log.Printf("📋 Got result: success=%v, error=%v", result.Success, err)
+		if err != nil {
+			log.Printf("❌ Task failed: %v", err)
+			failed++
+			continue
+		}
+		if result.Success {
+			completed++
+			log.Printf("✅ Task completed successfully")
+		} else {
+			log.Printf("❌ Task returned success=false: %s", result.Error)
+			failed++
+		}
+	}
+
+	duration := time.Since(start)
+
+	stats := QueueStats{
+		TotalEnqueued: len(handles),
+		Completed:     completed,
+		Failed:        failed,
+		Duration:      duration,
+	}
+
+	log.Printf("📊 Queue execution complete in %v", duration)
+	return stats, nil
+}
+
+// ExecuteTasksWithQueueDirectly executes tasks using DBOS queues from outside a workflow context.
+// This is a helper method that can be called directly (not as a workflow) to enqueue tasks.
+// This avoids the issue of trying to enqueue workflows from within a workflow.
+func (o *DBOSOrchestrator) ExecuteTasksWithQueueDirectly(tasks []TaskInput) (QueueStats, error) {
+	start := time.Now()
+
+	log.Printf("🚀 Starting DBOS queue-based execution with %d tasks", len(tasks))
+
+	// Build dependency map
+	o.buildDependencyMap(tasks)
+
+	// Find tasks with no dependencies (ready to run immediately)
+	readyTasks := o.findReadyTasks(tasks)
+
+	if len(readyTasks) == 0 {
+		return QueueStats{}, fmt.Errorf("no tasks ready to execute (circular dependencies?)")
+	}
+
+	log.Printf("📋 Enqueuing %d ready tasks (out of %d total)", len(readyTasks), len(tasks))
+
+	// Get the workflow name for ExecuteTaskWorkflow
+	workflowName := runtime.FuncForPC(reflect.ValueOf(o.ExecuteTaskWorkflow).Pointer()).Name()
+	log.Printf("📋 Workflow name: %s", workflowName)
+
 	// Enqueue all ready tasks for parallel execution
 	handles := make([]dbos.WorkflowHandle[TaskResult], len(readyTasks))
 	for i, task := range readyTasks {
-		handle, err := dbos.RunWorkflow(ctx, o.ExecuteTaskWorkflow, task,
+		handle, err := dbos.RunWorkflow(o.dbosCtx, o.ExecuteTaskWorkflow, task,
 			dbos.WithQueue(o.queue.Name),
 		)
 		if err != nil {
@@ -177,8 +265,14 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input Que
 	completed := 0
 	failed := 0
 
+	// Give the queue runner a moment to start processing workflows
+	log.Printf("⏸️  Giving queue runner a moment to start...")
+	time.Sleep(100 * time.Millisecond)
+
 	for _, handle := range handles {
+		log.Printf("⏳ Waiting for task result...")
 		result, err := handle.GetResult()
+		log.Printf("📋 Got result: success=%v, error=%v", result.Success, err)
 		if err != nil {
 			log.Printf("❌ Task failed: %v", err)
 			failed++
@@ -188,6 +282,7 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input Que
 			completed++
 			log.Printf("✅ Task completed successfully")
 		} else {
+			log.Printf("❌ Task returned success=false: %s", result.Error)
 			failed++
 		}
 	}

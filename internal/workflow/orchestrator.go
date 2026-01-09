@@ -1,4 +1,9 @@
 // Package workflow implements durable workflows using DBOS
+//
+// DEPRECATED: This file contains the legacy SQLite-based Orchestrator.
+// Drover now uses DBOS by default for both SQLite and PostgreSQL modes.
+// See dbos_workflow.go for the current DBOS-based implementation.
+// This file is kept for backwards compatibility and testing.
 package workflow
 
 import (

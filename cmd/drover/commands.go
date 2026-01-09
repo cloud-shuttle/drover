@@ -26,8 +26,12 @@ func initCmd() *cobra.Command {
 		Short: "Initialize Drover in the current project",
 		Long: `Initialize Drover in the current project.
 
-Creates a .drover directory with SQLite database for task storage.
-DBOS workflow engine is available for production use via DBOS_SYSTEM_DATABASE_URL.`,
+Creates a .drover directory with SQLite database for task storage and workflow state.
+Drover uses DBOS for durable workflow execution with automatic recovery.
+
+Database modes:
+- Default: DBOS with SQLite (zero setup, durable execution)
+- Production: Set DBOS_SYSTEM_DATABASE_URL to use PostgreSQL`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := os.Getwd()
 			if err != nil {
@@ -93,8 +97,8 @@ description: |
 
 			fmt.Printf("🐂 Initialized Drover in %s\n", droverDir)
 			fmt.Println("\nWorkflow Engine:")
-			fmt.Println("  • SQLite mode (default): Zero setup for local development")
-			fmt.Println("  • DBOS mode (production): Set DBOS_SYSTEM_DATABASE_URL for PostgreSQL")
+			fmt.Println("  • DBOS with SQLite (default): Durable execution, automatic recovery")
+			fmt.Println("  • DBOS with PostgreSQL: Set DBOS_SYSTEM_DATABASE_URL for production")
 			fmt.Println("\nNext steps:")
 			fmt.Println("  drover epic add \"My Epic\"")
 			fmt.Println("  drover add \"My first task\" --epic <epic-id>")
@@ -142,7 +146,7 @@ DBOS Workflow Engine:
 
 			if dbosURL != "" {
 				// Use DBOS orchestrator for production
-				return runWithDBOS(cmd, &runCfg, projectDir, dbosURL)
+				return runWithDBOS(cmd, &runCfg, store, projectDir, dbosURL)
 			}
 
 			// Default: Use SQLite-based orchestrator for local development
@@ -158,7 +162,7 @@ DBOS Workflow Engine:
 }
 
 // runWithDBOS executes tasks using DBOS workflow engine
-func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, projectDir, dbosURL string) error {
+func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, store *db.Store, projectDir, dbosURL string) error {
 	fmt.Println("🐂 Using DBOS workflow engine (PostgreSQL)")
 
 	// Initialize DBOS context
@@ -170,13 +174,7 @@ func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, projectDir, dbosURL 
 		return fmt.Errorf("initializing DBOS: %w", err)
 	}
 
-	// Launch DBOS runtime
-	if err := dbos.Launch(dbosCtx); err != nil {
-		return fmt.Errorf("launching DBOS: %w", err)
-	}
-	defer dbos.Shutdown(dbosCtx, 5*time.Second)
-
-	// Create DBOS orchestrator
+	// Create DBOS orchestrator (this creates the queue before Launch)
 	orch, err := workflow.NewDBOSOrchestrator(runCfg, dbosCtx, projectDir)
 	if err != nil {
 		return fmt.Errorf("creating DBOS orchestrator: %w", err)
@@ -187,13 +185,13 @@ func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, projectDir, dbosURL 
 		return fmt.Errorf("registering workflows: %w", err)
 	}
 
-	// Get tasks from database
-	projectDir, store, err := requireProject()
-	if err != nil {
-		return err
+	// Launch DBOS runtime (must be after queue creation and workflow registration)
+	if err := dbos.Launch(dbosCtx); err != nil {
+		return fmt.Errorf("launching DBOS: %w", err)
 	}
-	defer store.Close()
+	defer dbos.Shutdown(dbosCtx, 5*time.Second)
 
+	// Get tasks from database
 	tasks, err := store.ListTasks()
 	if err != nil {
 		return fmt.Errorf("listing tasks: %w", err)
@@ -234,7 +232,6 @@ func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, projectDir, dbosURL 
 	return nil
 }
 
-// runWithSQLite executes tasks using SQLite-based orchestrator
 func runWithSQLite(cmd *cobra.Command, runCfg *config.Config, store *db.Store, projectDir string) error {
 	fmt.Println("🐂 Using SQLite-based orchestrator (local mode)")
 
@@ -406,56 +403,14 @@ func resumeCmd() *cobra.Command {
 		Short: "Resume interrupted workflows",
 		Long: `Resume interrupted workflows.
 
-For SQLite mode: Resets in-progress tasks back to ready.
-For DBOS mode: Automatic workflow recovery via DBOS checkpointing.`,
+DBOS automatically handles workflow recovery through its durable execution engine.
+If a workflow is interrupted, simply run 'drover run' again and DBOS will
+continue from where it left off.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check if DBOS mode is enabled
-			dbosURL := os.Getenv("DBOS_SYSTEM_DATABASE_URL")
-
-			if dbosURL != "" {
-				// DBOS mode - workflows are automatically recovered on launch
-				fmt.Println("🐂 DBOS mode: Workflows are automatically recovered on 'drover run'")
-				fmt.Println("\nTo resume execution, simply run:")
-				fmt.Println("  drover run")
-				return nil
-			}
-
-			// SQLite mode - reset in-progress tasks
-			_, store, err := requireProject()
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-
-			fmt.Println("🐂 Resuming SQLite-based workflows...")
-
-			// Check for incomplete workflows
-			status, err := store.GetProjectStatus()
-			if err != nil {
-				return err
-			}
-
-			incomplete := status.InProgress + status.Claimed
-			if incomplete == 0 {
-				fmt.Println("No incomplete workflows found")
-				return nil
-			}
-
-			fmt.Printf("Found %d incomplete tasks (in_progress: %d, claimed: %d)\n",
-				incomplete, status.InProgress, status.Claimed)
-
-			// Reset in-progress and claimed tasks back to ready
-			count, err := store.ResetTasks([]types.TaskStatus{
-				types.TaskStatusInProgress,
-				types.TaskStatusClaimed,
-			})
-			if err != nil {
-				return fmt.Errorf("resetting tasks: %w", err)
-			}
-
-			fmt.Printf("✅ Reset %d tasks to ready status\n", count)
-			fmt.Println("\nYou can now run:")
+			fmt.Println("🐂 DBOS mode: Workflows are automatically recovered on 'drover run'")
+			fmt.Println("\nTo resume execution, simply run:")
 			fmt.Println("  drover run")
+			fmt.Println("\n💡 DBOS handles workflow recovery automatically through durable execution.")
 			return nil
 		},
 	}

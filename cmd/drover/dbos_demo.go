@@ -55,22 +55,22 @@ Note: This requires PostgreSQL to be running and DBOS_SYSTEM_DATABASE_URL to be 
 				return fmt.Errorf("failed to initialize DBOS: %w", err)
 			}
 
-			// Launch DBOS runtime
-			if err := dbos.Launch(dbosCtx); err != nil {
-				return fmt.Errorf("failed to launch DBOS: %w", err)
-			}
-			defer dbos.Shutdown(dbosCtx, 5*time.Second)
-
-			// Create DBOS orchestrator
+			// Create DBOS orchestrator BEFORE launching DBOS (so queues can be registered)
 			orchestrator, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, projectDir)
 			if err != nil {
 				return fmt.Errorf("failed to create orchestrator: %w", err)
 			}
 
-			// Register workflows
+			// Register workflows BEFORE launching DBOS
 			if err := orchestrator.RegisterWorkflows(); err != nil {
 				return fmt.Errorf("failed to register workflows: %w", err)
 			}
+
+			// Launch DBOS runtime AFTER registering workflows and queues
+			if err := dbos.Launch(dbosCtx); err != nil {
+				return fmt.Errorf("failed to launch DBOS: %w", err)
+			}
+			defer dbos.Shutdown(dbosCtx, 5*time.Second)
 
 			// Create sample tasks for demo - including dependencies
 			tasks := []workflow.TaskInput{
@@ -118,16 +118,10 @@ Note: This requires PostgreSQL to be running and DBOS_SYSTEM_DATABASE_URL to be 
 
 			if useQueue {
 				// Execute with queue (parallel execution)
-				input := workflow.QueuedTasksInput{Tasks: tasks}
-				handle, err := dbos.RunWorkflow(dbosCtx, orchestrator.ExecuteTasksWithQueue, input)
+				// Use ExecuteTasksWithQueueDirectly to avoid child workflow issues
+				stats, err := orchestrator.ExecuteTasksWithQueueDirectly(tasks)
 				if err != nil {
-					return fmt.Errorf("failed to start workflow: %w", err)
-				}
-
-				// Wait for results
-				stats, err := handle.GetResult()
-				if err != nil {
-					return fmt.Errorf("workflow execution failed: %w", err)
+					return fmt.Errorf("queue execution failed: %w", err)
 				}
 
 				// Print results
