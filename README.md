@@ -82,9 +82,12 @@ go install github.com/cloud-shuttle/drover@latest
 | `drover run --workers 8` | Run with 8 parallel agents |
 | `drover run --epic <id>` | Run only tasks in specific epic |
 | `drover add <title>` | Add a new task |
+| `drover add <title> --parent <id>` | Add a sub-task to parent |
+| `drover add "task-123.N title"` | Add sub-task with hierarchical syntax |
 | `drover epic add <title>` | Create a new epic |
 | `drover status` | Show current project status |
 | `drover status --watch` | Live progress updates |
+| `drover status --tree` | Show hierarchical task tree |
 | `drover resume` | Resume interrupted workflows |
 
 ## Configuration
@@ -143,6 +146,98 @@ drover add "Build API" --blocked-by task-abc,task-def
 
 # Assign to epic
 drover add "New feature" --epic epic-xyz
+```
+
+## Sub-Tasks
+
+Drover supports **hierarchical sub-tasks** with Beads-style task IDs (e.g., `task-123.1`, `task-123.1.2`). This lets you break down complex work into manageable pieces.
+
+### Creating Sub-Tasks
+
+There are two ways to create sub-tasks:
+
+#### 1. Using the `--parent` flag
+
+```bash
+# Create a parent task
+drover add "Implement authentication"
+# ✅ Created task task-1736123456789
+
+# Add sub-tasks using --parent
+drover add "Design schema" --parent task-1736123456789
+# ✅ Created task task-1736123456789.1
+
+drover add "Implement login" --parent task-1736123456789
+# ✅ Created task task-1736123456789.2
+
+drover add "Add OAuth" --parent task-1736123456789
+# ✅ Created task task-1736123456789.3
+```
+
+#### 2. Using hierarchical ID syntax
+
+```bash
+# Specify sequence number directly in the title
+drover add "task-1736123456789.5 Add JWT tokens"
+# ✅ Created task task-1736123456789.5
+
+drover add "task-1736123456789.10 Write tests"
+# ✅ Created task task-1736123456789.10
+```
+
+### Viewing Sub-Tasks
+
+Use the `--tree` flag for a hierarchical view:
+
+```bash
+drover status --tree
+```
+
+Output:
+```
+🐂 Drover Task Tree
+════════════════════
+⏳ task-1736123456789: Implement authentication
+    └── ⏳ task-1736123456789.1: Design schema
+    └── ⏳ task-1736123456789.2: Implement login
+    └── ⏳ task-1736123456789.3: Add OAuth
+    └── ⏳ task-1736123456789.5: Add JWT tokens
+    └── ⏳ task-1736123456789.10: Write tests
+```
+
+### How Sub-Tasks Execute
+
+When a parent task is claimed for execution:
+
+1. **Sub-tasks execute first** — All sub-tasks run sequentially (in order)
+2. **Parent executes last** — Only after all sub-tasks complete
+3. **Failure propagates** — If any sub-task fails, the parent task fails
+
+Sub-tasks are **never claimed independently** — they only run as part of their parent task's execution.
+
+### Hierarchy Rules
+
+- **Maximum depth**: 2 levels (Epic → Parent → Child)
+- **Sequence numbers**: Auto-incremented when using `--parent`, user-specified when using syntax
+- **ID format**: `parent-id.sequence` (e.g., `task-123.1`)
+
+### Example: Breaking Down a Feature
+
+```bash
+# Create the main feature task
+drover add "Build user settings page" --skip-validation
+
+# Break it down into sub-tasks
+drover add "Create settings UI component" --parent task-xyz
+drover add "Add settings persistence" --parent task-xyz
+drover add "Implement validation" --parent task-xyz
+drover add "Add unit tests" --parent task-xyz
+
+# View the hierarchy
+drover status --tree
+
+# Run - sub-tasks execute automatically when parent runs
+drover run
 ```
 
 ## How It Works
