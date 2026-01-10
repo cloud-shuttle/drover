@@ -20,7 +20,7 @@ Drover is a durable workflow orchestrator for parallel AI agent execution. It co
 2. **Parallelism** — Maximize throughput with concurrent agents
 3. **Correctness** — Respect dependencies, avoid conflicts
 4. **Simplicity** — Minimal configuration, sensible defaults
-5. **Observability** — Clear visibility into progress and issues
+5. **Observability** — Clear visibility into progress and issues (OpenTelemetry integration)
 
 ## Non-Goals
 
@@ -399,6 +399,61 @@ CREATE TABLE task_dependencies (
 
 ---
 
+## Observability
+
+### OpenTelemetry Integration
+
+Drover provides built-in observability via OpenTelemetry:
+
+**Traces** - Distributed tracing for operations:
+- Workflow execution (root span)
+- Task execution (child spans per task)
+- Agent execution (Claude Code calls)
+- Git operations (commit, merge)
+- Error tracking with categorized errors
+
+**Metrics** - Quantitative measurements:
+- Counters: tasks claimed/completed/failed
+- Histograms: task duration, agent duration
+- Gauges: active workers, pending tasks
+- Agent-specific: prompts sent, errors by type
+
+**Storage**: ClickHouse for scalable trace/metric storage
+**Visualization**: Grafana dashboards (included)
+
+**Configuration**:
+```bash
+export DROVER_OTEL_ENABLED=true     # Enable (default: false)
+export DROVER_OTEL_ENDPOINT=localhost:4317  # OTLP collector
+```
+
+### Trace Hierarchy
+
+```
+drover.workflow.run (root)
+├── drover.task.execute
+│   ├── drover.agent.execute (claude-code)
+│   └── dbos.step (worktree, commit, merge)
+└── drover.workflow.metrics
+```
+
+### Semantic Conventions
+
+Drover uses OpenTelemetry semantic conventions:
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `drover.task.id` | string | Task identifier |
+| `drover.task.title` | string | Human-readable title |
+| `drover.task.state` | string | ready/in_progress/completed/failed |
+| `drover.worker.id` | string | Worker identifier |
+| `drover.agent.type` | string | "claude-code" |
+| `drover.epic.id` | string | Epic identifier |
+
+See [scripts/telemetry/](../scripts/telemetry/) for full documentation.
+
+---
+
 ## Security Considerations
 
 ### Code Execution
@@ -432,7 +487,7 @@ Claude Code executes arbitrary code. Drover does not sandbox this execution. Use
 3. **Custom agents**: Support for other AI coding tools
 4. **Beads integration**: Bidirectional sync with Beads format
 5. **Webhooks**: Notifications on task completion/failure
-6. **Metrics**: Prometheus/OpenTelemetry integration
+6. ~~**Metrics**: Prometheus/OpenTelemetry integration~~ ✅ **Implemented**
 
 ### Known Limitations
 

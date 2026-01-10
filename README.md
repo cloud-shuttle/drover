@@ -99,6 +99,39 @@ export DROVER_DATABASE_URL="postgresql://localhost/drover"
 export DROVER_DATABASE_URL="sqlite:///.drover.db"
 ```
 
+### Observability
+
+Drover includes built-in OpenTelemetry observability for production monitoring:
+
+```bash
+# Enable OpenTelemetry (disabled by default)
+export DROVER_OTEL_ENABLED=true
+export DROVER_OTEL_ENDPOINT=localhost:4317
+
+# Run with observability
+drover run
+```
+
+**What you get:**
+- **Traces**: Distributed tracing for workflows, tasks, and agent execution
+- **Metrics**: Task completion rates, duration histograms, error counts
+- **Dashboards**: Grafana dashboards for real-time monitoring
+
+**Quick Start (with Docker):**
+```bash
+# Start the observability stack
+docker compose -f docker-compose.telemetry.yaml up -d
+
+# Run Drover with telemetry
+export DROVER_OTEL_ENABLED=true
+drover run
+
+# View dashboards
+open http://localhost:3000  # admin/admin
+```
+
+See [Observability Guide](./scripts/telemetry/README.md) for details.
+
 ### Task Options
 
 ```bash
@@ -219,8 +252,9 @@ Drover is built on a pure Go stack:
 | Database | PostgreSQL/SQLite | State persistence |
 | AI Agent | Claude Code | Task execution |
 | Isolation | Git Worktrees | Parallel workspaces |
+| Observability | OpenTelemetry | Traces & metrics |
 
-See [DESIGN.md](./DESIGN.md) for detailed architecture documentation.
+See [DESIGN.md](./design/DESIGN.md) for detailed architecture documentation.
 
 ## Comparison
 
