@@ -1094,8 +1094,79 @@ Use --force to skip confirmation.`,
 				return fmt.Errorf("querying worktrees for cleanup: %w", err)
 			}
 
-			if len(worktrees) == 0 {
+			// Also check for orphaned worktrees upfront (on disk but not in database)
+			orphanedPaths, err := store.GetOrphanedWorktrees(worktreeDir)
+			if err != nil {
+				return fmt.Errorf("listing orphaned worktrees: %w", err)
+			}
+
+			// Extract task IDs from orphaned paths
+			orphanedTaskIDs := make([]string, 0, len(orphanedPaths))
+			for _, path := range orphanedPaths {
+				orphanedTaskIDs = append(orphanedTaskIDs, filepath.Base(path))
+			}
+
+			if len(worktrees) == 0 && len(orphanedTaskIDs) == 0 {
 				fmt.Println("No worktrees to prune (no completed/failed tasks with worktrees)")
+				return nil
+			}
+
+			// If we only have orphaned worktrees, clean them up
+			if len(worktrees) == 0 && len(orphanedTaskIDs) > 0 {
+				fmt.Printf("Found %d orphaned worktree(s) (not tracked in database)\n", len(orphanedTaskIDs))
+
+				// Calculate sizes before removal
+				orphanedSizes := make(map[string]int64)
+				var totalOrphanedSize int64
+				for _, taskID := range orphanedTaskIDs {
+					if size, err := gitMgr.GetDiskUsage(taskID); err == nil {
+						orphanedSizes[taskID] = size
+						totalOrphanedSize += size
+					}
+				}
+				if totalOrphanedSize > 0 {
+					fmt.Printf("Total disk usage: %s\n", formatBytes(totalOrphanedSize))
+				}
+
+				fmt.Println("\nOrphaned worktrees to be removed:")
+				for _, taskID := range orphanedTaskIDs {
+					fmt.Printf("  - %s (%s)\n", taskID, formatBytes(orphanedSizes[taskID]))
+				}
+
+				// Confirm unless --force
+				if !force {
+					fmt.Print("\nRemove these orphaned worktrees? [y/N] ")
+					var response string
+					fmt.Scanln(&response)
+					if response != "y" && response != "Y" {
+						fmt.Println("Aborted")
+						return nil
+					}
+				}
+
+				// Remove orphaned worktrees
+				var totalFreed int64
+				for _, taskID := range orphanedTaskIDs {
+					worktreePath := filepath.Join(worktreeDir, taskID)
+					var freed int64
+					var err error
+
+					if aggressive {
+						freed, err = gitMgr.RemoveAggressiveByPath(worktreePath)
+					} else {
+						err = gitMgr.RemoveByPath(worktreePath)
+						// For non-aggressive removal, use the pre-calculated size
+						freed = orphanedSizes[taskID]
+					}
+
+					if err != nil {
+						fmt.Printf("⚠️  Failed to remove %s: %v\n", taskID, err)
+						continue
+					}
+					totalFreed += freed
+				}
+
+				fmt.Printf("\n✅ Pruned %d orphaned worktrees, freed %s\n", len(orphanedTaskIDs), formatBytes(totalFreed))
 				return nil
 			}
 

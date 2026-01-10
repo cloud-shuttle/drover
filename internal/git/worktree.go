@@ -423,12 +423,39 @@ func (wm *WorktreeManager) ListWorktreesOnDisk() ([]string, error) {
 
 // PruneOrphaned removes all worktrees that exist on disk but are not registered with git
 func (wm *WorktreeManager) PruneOrphaned() ([]string, int64, error) {
+	orphaned, _ := wm.ListOrphaned()
+
+	var pruned []string
+	var totalFreed int64
+
+	for _, taskID := range orphaned {
+		worktreePath := filepath.Join(wm.worktreeDir, taskID)
+		size, _ := wm.GetDiskUsage(taskID)
+		if err := os.RemoveAll(worktreePath); err == nil {
+			pruned = append(pruned, taskID)
+			totalFreed += size
+			if wm.verbose {
+				log.Printf("🗑️  Pruned orphaned worktree: %s (freed %s)", taskID, formatBytes(size))
+			}
+		}
+	}
+
+	// Also run git worktree prune to clean up registrations
+	cmd := exec.Command("git", "worktree", "prune")
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run()
+
+	return pruned, totalFreed, nil
+}
+
+// ListOrphaned returns all worktree task IDs that exist on disk but are not registered with git
+func (wm *WorktreeManager) ListOrphaned() ([]string, error) {
 	// Get all git-registered worktrees
 	cmd := exec.Command("git", "worktree", "list", "--porcelain")
 	cmd.Dir = wm.baseDir
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, 0, fmt.Errorf("listing worktrees: %w", err)
+		return nil, fmt.Errorf("listing worktrees: %w", err)
 	}
 
 	// Parse registered worktree paths
@@ -444,33 +471,88 @@ func (wm *WorktreeManager) PruneOrphaned() ([]string, int64, error) {
 	// Get all directories on disk
 	onDisk, err := wm.ListWorktreesOnDisk()
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
-	var pruned []string
-	var totalFreed int64
-
+	var orphaned []string
 	for _, taskID := range onDisk {
 		worktreePath := filepath.Join(wm.worktreeDir, taskID)
 		// If not registered, it's orphaned
 		if !registeredPaths[worktreePath] {
-			size, _ := wm.GetDiskUsage(taskID)
-			if err := os.RemoveAll(worktreePath); err == nil {
-				pruned = append(pruned, taskID)
-				totalFreed += size
+			orphaned = append(orphaned, taskID)
+		}
+	}
+
+	return orphaned, nil
+}
+
+// RemoveByPath removes a worktree by its full path
+func (wm *WorktreeManager) RemoveByPath(worktreePath string) error {
+	// Remove git worktree registration if it exists
+	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	cmd.Dir = wm.baseDir
+	_, _ = cmd.CombinedOutput() // Ignore errors
+
+	// Remove the directory
+	if err := os.RemoveAll(worktreePath); err != nil {
+		return fmt.Errorf("removing worktree directory: %w", err)
+	}
+
+	// Prune stale git worktree registrations
+	cmd = exec.Command("git", "worktree", "prune")
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run()
+
+	return nil
+}
+
+// RemoveAggressiveByPath removes a worktree by its full path and aggressively cleans up build artifacts
+func (wm *WorktreeManager) RemoveAggressiveByPath(worktreePath string) (int64, error) {
+	var sizeFreed int64
+
+	// Clean up large build directories within the worktree
+	for _, dirName := range aggressiveCleanupDirs {
+		dirPath := filepath.Join(worktreePath, dirName)
+		if size, err := wm.getDirectorySize(dirPath); err == nil && size > 0 {
+			if err := os.RemoveAll(dirPath); err == nil {
+				sizeFreed += size
 				if wm.verbose {
-					log.Printf("🗑️  Pruned orphaned worktree: %s (freed %s)", taskID, formatBytes(size))
+					log.Printf("🗑️  Removed %s: freed %s", dirName, formatBytes(size))
 				}
 			}
 		}
 	}
 
-	// Also run git worktree prune to clean up registrations
+	// Clean up nested node_modules
+	if err := wm.removeAllNestedDirectories(worktreePath, "node_modules"); err == nil {
+		if wm.verbose {
+			log.Printf("🗑️  Removed nested node_modules directories")
+		}
+	}
+
+	// Clean up nested target directories
+	if err := wm.removeAllNestedDirectories(worktreePath, "target"); err == nil {
+		if wm.verbose {
+			log.Printf("🗑️  Removed nested target directories")
+		}
+	}
+
+	// Remove git worktree registration
+	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	cmd.Dir = wm.baseDir
+	_, _ = cmd.CombinedOutput()
+
+	// Remove the directory
+	if err := os.RemoveAll(worktreePath); err != nil {
+		return sizeFreed, fmt.Errorf("removing worktree directory: %w", err)
+	}
+
+	// Prune stale git worktree registrations
 	cmd = exec.Command("git", "worktree", "prune")
 	cmd.Dir = wm.baseDir
 	_ = cmd.Run()
 
-	return pruned, totalFreed, nil
+	return sizeFreed, nil
 }
 
 // CleanupAll removes all worktrees and returns total space freed
