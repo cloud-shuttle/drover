@@ -207,6 +207,11 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 		return nil
 	}
 
+	// Delete the branch if it already exists from a previous failed run
+	cmd = exec.Command("git", "branch", "-D", branchName)
+	cmd.Dir = wm.baseDir
+	_, _ = cmd.CombinedOutput() // Ignore errors - branch may not exist
+
 	// Create a branch from the worktree
 	cmd = exec.Command("git", "checkout", "-b", branchName)
 	cmd.Dir = worktreePath
