@@ -1,0 +1,93 @@
+# Docker Compose for Drover Observability Stack
+# Usage: docker compose -f docker-compose.telemetry.yaml up -d
+version: '3.8'
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1
+    container_name: drover-clickhouse
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # Native interface
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./scripts/telemetry/init-clickhouse.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      CLICKHOUSE_DB: drover_telemetry
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - drover_telemetry
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.111.0
+    container_name: drover-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "13133:13133" # Health check
+      - "1777:1777"   # pprof
+      - "55679:55679" # zpages
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      DROVER_ENV: ${DROVER_ENV:-development}
+    networks:
+      - drover_telemetry
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: drover-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./scripts/telemetry/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./scripts/telemetry/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - drover_telemetry
+
+  # Optional: Vector for log aggregation
+  # vector:
+  #   image: timberio/vector:0.35.0-alpine
+  #   container_name: drover-vector
+  #   volumes:
+  #     - ./scripts/telemetry/vector.toml:/etc/vector/vector.toml:ro
+  #     - /var/log:/var/log:ro
+  #   ports:
+  #     - "4318:4318"  # OTLP HTTP (alternative to collector)
+  #   command: --config /etc/vector/vector.toml
+  #   depends_on:
+  #     - clickhouse
+  #   networks:
+  #     - drover_telemetry
+
+volumes:
+  clickhouse_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  drover_telemetry:
+    driver: bridge

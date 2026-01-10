@@ -2,12 +2,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/cloud-shuttle/drover/internal/config"
 	"github.com/cloud-shuttle/drover/internal/db"
+	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +21,21 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Initialize OpenTelemetry
+	ctx := context.Background()
+	shutdown, err := telemetry.Init(ctx, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize telemetry: %v\n", err)
+		// Continue without telemetry rather than failing
+	} else if shutdown != nil {
+		// Ensure shutdown is called on exit
+		defer func() {
+			if err := shutdown(context.Background()); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: telemetry shutdown error: %v\n", err)
+			}
+		}()
 	}
 
 	rootCmd := &cobra.Command{

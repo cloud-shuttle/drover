@@ -189,7 +189,7 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	defer o.git.Remove(task.ID)
 
 	// Execute Claude Code and capture the result
-	result := o.executor.ExecuteWithTimeout(worktreePath, task)
+	result := o.executor.ExecuteWithTimeout(context.Background(), worktreePath, task)
 	if !result.Success {
 		log.Printf("❌ Task %s failed: claude execution: %v", task.ID, result.Error)
 		if o.handleTaskFailure(task.ID, result.Error.Error()) {

@@ -17,8 +17,11 @@ import (
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/internal/git"
+	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // TaskInput represents the input for a task execution step
@@ -124,9 +127,17 @@ func (o *DBOSOrchestrator) RegisterWorkflows() error {
 // ExecuteAllTasks is the main DBOS workflow that processes all tasks sequentially
 // This is the original implementation for comparison
 func (o *DBOSOrchestrator) ExecuteAllTasks(ctx dbos.DBOSContext, tasks []TaskInput) ([]TaskResult, error) {
+	startTime := time.Now()
 	log.Printf("🐂 Starting DBOS workflow (sequential) with %d tasks", len(tasks))
 
+	// Start telemetry span for the workflow
+	workflowCtx, span := telemetry.StartWorkflowSpan(ctx, telemetry.WorkflowTypeSequential,
+		generateWorkflowID(), attribute.Int("drover.task_count", len(tasks)))
+	defer span.End()
+
 	results := make([]TaskResult, len(tasks))
+	completed := 0
+	failed := 0
 
 	// Execute tasks sequentially - DBOS handles checkpointing after each step
 	for i, task := range tasks {
@@ -137,11 +148,28 @@ func (o *DBOSOrchestrator) ExecuteAllTasks(ctx dbos.DBOSContext, tasks []TaskInp
 				Success: false,
 				Error:   err.Error(),
 			}
+			// Record failure metric
+			telemetry.RecordTaskFailed(workflowCtx, "workflow-sequential", "", "workflow_error", 0)
+			failed++
 			// Continue with next task - DBOS will track the failure
 			continue
 		}
 		results[i] = result
+		if result.Success {
+			completed++
+			telemetry.RecordTaskCompleted(workflowCtx, "workflow-sequential", "", time.Since(startTime))
+		} else {
+			failed++
+			telemetry.RecordTaskFailed(workflowCtx, "workflow-sequential", "", "task_error", result.Duration)
+		}
 	}
+
+	// Record workflow completion metrics
+	span.SetAttributes(
+		attribute.Int("drover.workflow.completed", completed),
+		attribute.Int("drover.workflow.failed", failed),
+		attribute.Float64("drover.workflow.duration_seconds", time.Since(startTime).Seconds()),
+	)
 
 	log.Println("✅ DBOS workflow complete")
 	return results, nil
@@ -306,23 +334,40 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	start := time.Now()
 	log.Printf("👷 Executing task %s: %s", task.TaskID, task.Title)
 
+	// Start telemetry span for task execution
+	taskAttrs := telemetry.TaskAttrs(task.TaskID, task.Title, "running", task.Priority, 1)
+	if task.EpicID != "" {
+		taskAttrs = append(taskAttrs, telemetry.EpicAttrs(task.EpicID)...)
+	}
+	taskCtx, span := telemetry.StartTaskSpan(ctx, telemetry.SpanTaskExecute, taskAttrs...)
+	defer span.End()
+
+	// Record task claimed
+	telemetry.RecordTaskClaimed(taskCtx, "dbos-workflow", "")
+
 	// Create worktree for isolated execution (as a step)
 	worktreePath, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (string, error) {
 		return o.createWorktreeStep(stepCtx, task)
 	}, dbos.WithStepMaxRetries(3))
 	if err != nil {
+		telemetry.RecordError(span, err, "WorktreeCreationError", telemetry.ErrorCategoryWorktree)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "worktree_error", 0)
 		return TaskResult{Success: false, Error: fmt.Sprintf("creating worktree: %v", err)}, err
 	}
 
 	// Execute Claude Code (as a step for durability)
 	claudeResult, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (*executor.ExecutionResult, error) {
-		return o.executeClaudeStep(stepCtx, worktreePath, task)
+		return o.executeClaudeStep(stepCtx, worktreePath, task, span)
 	}, dbos.WithStepMaxRetries(3))
 	if err != nil {
+		telemetry.RecordError(span, err, "ClaudeExecutionError", telemetry.ErrorCategoryAgent)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "agent_error", 0)
 		return TaskResult{Success: false, Error: err.Error()}, err
 	}
 
 	if !claudeResult.Success {
+		telemetry.RecordError(span, claudeResult.Error, "ClaudeTaskFailed", telemetry.ErrorCategoryAgent)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "agent_error", claudeResult.Duration)
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
@@ -335,6 +380,8 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		return o.commitChangesStep(stepCtx, task, claudeResult.Output)
 	}, dbos.WithStepMaxRetries(3))
 	if err != nil {
+		telemetry.RecordError(span, err, "CommitError", telemetry.ErrorCategoryGit)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "commit_error", 0)
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
@@ -353,6 +400,10 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 
 	duration := time.Since(start)
 	log.Printf("✅ Task %s completed in %v", task.TaskID, duration)
+
+	// Record task completion
+	telemetry.SetTaskStatus(span, "completed")
+	telemetry.RecordTaskCompleted(taskCtx, "dbos-workflow", "", duration)
 
 	return TaskResult{
 		Success:    true,
@@ -441,13 +492,13 @@ func (o *DBOSOrchestrator) createWorktreeStep(ctx context.Context, task TaskInpu
 
 // executeClaudeStep runs Claude Code in the worktree
 // This is a step function - must accept only context.Context
-func (o *DBOSOrchestrator) executeClaudeStep(ctx context.Context, worktreePath string, task TaskInput) (*executor.ExecutionResult, error) {
-	result := o.executor.ExecuteWithTimeout(worktreePath, &types.Task{
+func (o *DBOSOrchestrator) executeClaudeStep(ctx context.Context, worktreePath string, task TaskInput, parentSpan trace.Span) (*executor.ExecutionResult, error) {
+	result := o.executor.ExecuteWithTimeout(ctx, worktreePath, &types.Task{
 		ID:          task.TaskID,
 		Title:       task.Title,
 		Description: task.Description,
 		EpicID:      task.EpicID,
-	})
+	}, parentSpan)
 
 	if !result.Success {
 		return nil, result.Error
@@ -554,4 +605,9 @@ func (o *DBOSOrchestrator) PrintQueueStats(stats QueueStats) {
 	if stats.Failed > 0 {
 		fmt.Println("\n\n⚠️  Some tasks did not complete successfully")
 	}
+}
+
+// generateWorkflowID generates a unique workflow ID for telemetry
+func generateWorkflowID() string {
+	return fmt.Sprintf("workflow-%d", time.Now().UnixNano())
 }

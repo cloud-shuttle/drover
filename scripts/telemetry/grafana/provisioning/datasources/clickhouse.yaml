@@ -1,0 +1,32 @@
+# Grafana datasource provisioning for ClickHouse
+apiVersion: 1
+
+datasources:
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    uid: clickhouse_drover
+    access: proxy
+    url: http://clickhouse:8123
+    jsonData:
+      server: clickhouse
+      port: 8123
+      database: drover_telemetry
+      username: default
+      # Use environment variable for password if needed
+      # password: ${CLICKHOUSE_PASSWORD}
+      # TLS options if needed
+      # tlsConfig:
+      #   enabled: false
+    editable: true
+    isDefault: true
+
+  - name: Drover Telemetry
+    type: prometheus
+    uid: drover_telemetry
+    access: proxy
+    url: http://otel-collector:9090
+    jsonData:
+      timeInterval: 15s
+      httpMethod: POST
+    editable: true
+    isDefault: false

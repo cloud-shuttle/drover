@@ -11,14 +11,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // ExecutionResult contains the result of a Claude execution
 type ExecutionResult struct {
-	Success bool
-	Output  string
-	Error   error
+	Success  bool
+	Output   string
+	Error    error
+	Duration time.Duration
 }
 
 // Executor runs tasks using Claude Code
@@ -70,6 +74,7 @@ func (e *Executor) Execute(worktreePath string, task *types.Task) *ExecutionResu
 			Success: false,
 			Output:  fullOutput,
 			Error:   fmt.Errorf("claude failed after %v: %w", duration, err),
+			Duration: duration,
 		}
 	}
 
@@ -77,6 +82,7 @@ func (e *Executor) Execute(worktreePath string, task *types.Task) *ExecutionResu
 		Success: true,
 		Output:  fullOutput,
 		Error:   nil,
+		Duration: duration,
 	}
 }
 
@@ -100,15 +106,32 @@ func (e *Executor) buildPrompt(task *types.Task) string {
 }
 
 // ExecuteWithTimeout runs a task with a timeout and returns the execution result
-func (e *Executor) ExecuteWithTimeout(worktreePath string, task *types.Task) *ExecutionResult {
+func (e *Executor) ExecuteWithTimeout(parentCtx context.Context, worktreePath string, task *types.Task, parentSpan ...trace.Span) *ExecutionResult {
 	ctx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
 
-	return e.ExecuteWithContext(ctx, worktreePath, task)
+	return e.ExecuteWithContext(ctx, worktreePath, task, parentSpan...)
 }
 
 // ExecuteWithContext runs a task with a context and returns the execution result
-func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task) *ExecutionResult {
+func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task, parentSpan ...trace.Span) *ExecutionResult {
+	// Start telemetry span for agent execution
+	var agentCtx context.Context
+	var span trace.Span
+	if len(parentSpan) > 0 && parentSpan[0] != nil {
+		agentCtx, span = telemetry.StartAgentSpan(ctx, telemetry.AgentTypeClaudeCode, "unknown",
+			attribute.String(telemetry.KeyTaskID, task.ID),
+			attribute.String(telemetry.KeyTaskTitle, task.Title),
+		)
+		defer span.End()
+	} else {
+		agentCtx = ctx
+		span = trace.SpanFromContext(ctx)
+	}
+
+	// Record agent prompt
+	telemetry.RecordAgentPrompt(agentCtx, telemetry.AgentTypeClaudeCode)
+
 	// Build the prompt
 	prompt := e.buildPrompt(task)
 
@@ -149,13 +172,20 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, 
 			log.Printf("❌ Claude exited with code %d after %v", exitCode, duration)
 		}
 
+		// Record error
+		telemetry.RecordAgentError(agentCtx, telemetry.AgentTypeClaudeCode, "execution_failed")
+
 		if ctx.Err() == context.DeadlineExceeded {
+			telemetry.RecordError(span, err, "TimeoutError", telemetry.ErrorCategoryTimeout)
+			telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeClaudeCode, duration)
 			return &ExecutionResult{
 				Success: false,
 				Output:  fullOutput,
 				Error:   fmt.Errorf("claude timed out after %v", duration),
 			}
 		}
+		telemetry.RecordError(span, err, "ExecutionError", telemetry.ErrorCategoryAgent)
+		telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeClaudeCode, duration)
 		return &ExecutionResult{
 			Success: false,
 			Output:  fullOutput,
@@ -166,10 +196,15 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, 
 	if e.verbose {
 		log.Printf("✅ Claude completed successfully in %v", duration)
 	}
+
+	// Record successful completion
+	telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeClaudeCode, duration)
+
 	return &ExecutionResult{
 		Success: true,
 		Output:  fullOutput,
 		Error:   nil,
+		Duration: duration,
 	}
 }
 

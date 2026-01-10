@@ -62,7 +62,7 @@ func TestExecutor_ExecuteWithTimeout_Success(t *testing.T) {
 		Description: "Test Description",
 	}
 
-	result := exec.ExecuteWithTimeout(tmpDir, task)
+	result := exec.ExecuteWithTimeout(context.Background(), tmpDir, task)
 	if !result.Success {
 		t.Errorf("ExecuteWithTimeout failed: %v", result.Error)
 	}
@@ -81,7 +81,7 @@ func TestExecutor_ExecuteWithTimeout_Timeout(t *testing.T) {
 		Description: "Test Description",
 	}
 
-	result := exec.ExecuteWithTimeout(tmpDir, task)
+	result := exec.ExecuteWithTimeout(context.Background(), tmpDir, task)
 	if result.Success {
 		t.Error("Expected timeout error, got success")
 	}

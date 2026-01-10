@@ -1,0 +1,95 @@
+# OpenTelemetry Collector configuration for Drover
+# Usage: otelcol-contrib --config otel-collector-config.yaml
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+    send_batch_max_size: 3000
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  attributes:
+    actions:
+      - key: deployment.environment
+        value: ${DROVER_ENV:-development}
+        action: upsert
+      - key: service.name
+        value: drover
+        action: upsert
+
+  # Generate RED metrics from spans (Rate, Errors, Duration)
+  spanmetrics:
+    metrics_exporter: clickhouse
+    dimensions:
+      - name: drover.project.id
+        default: unknown
+      - name: drover.task.state
+        default: unknown
+      - name: drover.worker.id
+        default: unknown
+      - name: drover.agent.type
+        default: unknown
+    dimensions_cache_size: 1000
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000
+    database: drover_telemetry
+    username: default
+    password: ""
+    ttl_days: 30
+    ttl_interval: 1h
+    traces_table_name: otel_traces
+    metrics_table_name: otel_metrics
+    logs_table_name: otel_logs
+    timeout: 10s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  debug:
+    verbosity: detailed
+    sampling_initial: 1
+    sampling_thereafter: 10
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, attributes]
+      exporters: [clickhouse, debug]
+
+    metrics:
+      receivers: [otlp, spanmetrics]
+      processors: [memory_limiter, batch]
+      exporters: [clickhouse, debug]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [clickhouse, debug]
