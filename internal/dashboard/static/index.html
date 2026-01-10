@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drover Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1>🐂 Drover Dashboard</h1>
+        <span id="connection-status" class="status-indicator offline">Offline</span>
+      </div>
+      <div class="header-right">
+        <nav class="nav">
+          <button data-view="overview" class="nav-btn active">Overview</button>
+          <button data-view="epics" class="nav-btn">Epics</button>
+          <button data-view="tasks" class="nav-btn">Tasks</button>
+          <button data-view="workers" class="nav-btn">Workers</button>
+          <button data-view="graph" class="nav-btn">Graph</button>
+        </nav>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main>
+      <!-- Overview View -->
+      <section id="view-overview" class="view active">
+        <div class="stats-grid">
+          <div class="stat-card ready">
+            <div class="stat-value" id="stat-ready">-</div>
+            <div class="stat-label">Ready</div>
+          </div>
+          <div class="stat-card active">
+            <div class="stat-value" id="stat-active">-</div>
+            <div class="stat-label">Active</div>
+          </div>
+          <div class="stat-card blocked">
+            <div class="stat-value" id="stat-blocked">-</div>
+            <div class="stat-label">Blocked</div>
+          </div>
+          <div class="stat-card done">
+            <div class="stat-value" id="stat-done">-</div>
+            <div class="stat-label">Done</div>
+          </div>
+          <div class="stat-card failed">
+            <div class="stat-value" id="stat-failed">-</div>
+            <div class="stat-label">Failed</div>
+          </div>
+        </div>
+
+        <div class="progress-section">
+          <div class="progress-header">
+            <span>Progress</span>
+            <span id="progress-percent">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+        </div>
+
+        <div class="activity-section">
+          <h3>Recent Activity</h3>
+          <div id="activity-log" class="activity-log"></div>
+        </div>
+      </section>
+
+      <!-- Epics View -->
+      <section id="view-epics" class="view">
+        <h2>Epics</h2>
+        <div id="epics-list" class="epics-list"></div>
+      </section>
+
+      <!-- Tasks View -->
+      <section id="view-tasks" class="view">
+        <h2>Tasks</h2>
+        <div class="filters">
+          <select id="filter-epic">
+            <option value="">All Epics</option>
+          </select>
+          <select id="filter-status">
+            <option value="">All Statuses</option>
+            <option value="ready">Ready</option>
+            <option value="claimed">Claimed</option>
+            <option value="in_progress">In Progress</option>
+            <option value="blocked">Blocked</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+          </select>
+        </div>
+        <div id="tasks-list" class="tasks-list"></div>
+      </section>
+
+      <!-- Workers View -->
+      <section id="view-workers" class="view">
+        <h2>Active Workers</h2>
+        <div id="workers-list" class="workers-list"></div>
+      </section>
+
+      <!-- Graph View -->
+      <section id="view-graph" class="view">
+        <h2>Dependency Graph</h2>
+        <svg id="dependency-graph" class="dependency-graph"></svg>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

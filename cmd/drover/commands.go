@@ -1184,3 +1184,31 @@ func formatBytes(bytes int64) string {
 
 	return fmt.Sprintf("%.1f %s", value, units[unitIndex])
 }
+
+// dashboardCmd starts the web dashboard
+func dashboardCmd() *cobra.Command {
+	var (
+		port string
+		open bool
+	)
+
+	command := &cobra.Command{
+		Use:   "dashboard",
+		Short: "Start the web dashboard",
+		Long:  `Start a local web dashboard for visualizing project progress, tasks, and workers in real-time.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			// Import dashboard package
+			return runDashboard(store, port, open)
+		},
+	}
+
+	command.Flags().StringVarP(&port, "port", "p", "3847", "Port to run dashboard on")
+	command.Flags().BoolVar(&open, "open", false, "Open browser automatically")
+	return command
+}

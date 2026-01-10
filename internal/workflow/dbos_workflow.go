@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/config"
+	"github.com/cloud-shuttle/drover/internal/dashboard"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/internal/git"
@@ -345,14 +346,22 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	// Record task claimed
 	telemetry.RecordTaskClaimed(taskCtx, "dbos-workflow", "")
 
+	// Broadcast task claimed to dashboard
+	dashboard.BroadcastTaskClaimed(task.TaskID, task.Title, "dbos-workflow")
+
+	// Broadcast task started to dashboard
+	dashboard.BroadcastTaskStarted(task.TaskID, task.Title, "dbos-workflow")
+
 	// Create worktree for isolated execution (as a step)
 	worktreePath, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (string, error) {
 		return o.createWorktreeStep(stepCtx, task)
 	}, dbos.WithStepMaxRetries(3))
 	if err != nil {
+		errMsg := fmt.Sprintf("creating worktree: %v", err)
 		telemetry.RecordError(span, err, "WorktreeCreationError", telemetry.ErrorCategoryWorktree)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "worktree_error", 0)
-		return TaskResult{Success: false, Error: fmt.Sprintf("creating worktree: %v", err)}, err
+		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
+		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
 	// Execute Claude Code (as a step for durability)
@@ -360,18 +369,22 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		return o.executeClaudeStep(stepCtx, worktreePath, task, span)
 	}, dbos.WithStepMaxRetries(3))
 	if err != nil {
+		errMsg := fmt.Sprintf("agent error: %v", err)
 		telemetry.RecordError(span, err, "ClaudeExecutionError", telemetry.ErrorCategoryAgent)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "agent_error", 0)
-		return TaskResult{Success: false, Error: err.Error()}, err
+		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
+		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
 	if !claudeResult.Success {
+		errMsg := claudeResult.Error.Error()
 		telemetry.RecordError(span, claudeResult.Error, "ClaudeTaskFailed", telemetry.ErrorCategoryAgent)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "agent_error", claudeResult.Duration)
+		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
-			Error:   claudeResult.Error.Error(),
+			Error:   errMsg,
 		}, claudeResult.Error
 	}
 
@@ -380,12 +393,14 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		return o.commitChangesStep(stepCtx, task, claudeResult.Output)
 	}, dbos.WithStepMaxRetries(3))
 	if err != nil {
+		errMsg := fmt.Sprintf("committing: %v", err)
 		telemetry.RecordError(span, err, "CommitError", telemetry.ErrorCategoryGit)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "commit_error", 0)
+		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
-			Error:   fmt.Sprintf("committing: %v", err),
+			Error:   errMsg,
 		}, err
 	}
 
@@ -400,6 +415,9 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 
 	duration := time.Since(start)
 	log.Printf("✅ Task %s completed in %v", task.TaskID, duration)
+
+	// Broadcast task completed to dashboard
+	dashboard.BroadcastTaskCompleted(task.TaskID, task.Title)
 
 	// Record task completion
 	telemetry.SetTaskStatus(span, "completed")

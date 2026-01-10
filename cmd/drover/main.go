@@ -59,6 +59,7 @@ handles failures gracefully, and guarantees progress through crashes and restart
 		installCmd(),
 		dbosDemoCmd(),
 		worktreeCmd(),
+		dashboardCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

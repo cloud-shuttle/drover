@@ -1,0 +1,447 @@
+/* Drover Dashboard Styles */
+
+:root {
+  --bg: #0d1117;
+  --bg-card: #161b22;
+  --bg-hover: #21262d;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --success: #3fb950;
+  --warning: #d29922;
+  --error: #f85149;
+  --ready: #58a6ff;
+  --active: #d29922;
+  --blocked: #f85149;
+  --done: #3fb950;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* Header */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.header h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.status-indicator {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.status-indicator.online {
+  background: var(--success);
+  color: white;
+}
+
+.status-indicator.offline {
+  background: var(--border);
+  color: var(--text-muted);
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+}
+
+.nav-btn:hover {
+  background: var(--bg-hover);
+}
+
+.nav-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+/* Views */
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
+}
+
+/* Stats Grid */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 15px;
+  margin-bottom: 30px;
+}
+
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  margin-bottom: 5px;
+}
+
+.stat-card.ready .stat-value { color: var(--ready); }
+.stat-card.active .stat-value { color: var(--active); }
+.stat-card.blocked .stat-value { color: var(--blocked); }
+.stat-card.done .stat-value { color: var(--done); }
+.stat-card.failed .stat-value { color: var(--error); }
+
+.stat-label {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Progress Bar */
+.progress-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 30px;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.progress-bar {
+  height: 24px;
+  background: var(--bg);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--success), var(--accent));
+  transition: width 0.5s ease;
+}
+
+/* Activity Log */
+.activity-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.activity-section h3 {
+  margin-bottom: 15px;
+  font-size: 1.1rem;
+}
+
+.activity-log {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.activity-item {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+}
+
+.activity-item:last-child {
+  border-bottom: none;
+}
+
+.activity-item.success { border-left: 3px solid var(--success); }
+.activity-item.error { border-left: 3px solid var(--error); }
+.activity-item.info { border-left: 3px solid var(--accent); }
+
+.activity-time {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  min-width: 80px;
+}
+
+.activity-message {
+  flex: 1;
+}
+
+/* Epics */
+.epics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.epic-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.epic-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.epic-header h3 {
+  font-size: 1.1rem;
+}
+
+.epic-description {
+  color: var(--text-muted);
+  margin-bottom: 15px;
+}
+
+.epic-stats {
+  display: flex;
+  gap: 20px;
+  font-size: 0.9rem;
+  margin-bottom: 10px;
+}
+
+/* Tasks */
+.filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.filters select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.tasks-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 15px;
+}
+
+.task-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 15px;
+  border-left: 3px solid var(--border);
+}
+
+.task-card.status-ready { border-left-color: var(--ready); }
+.task-card.status-claimed { border-left-color: var(--active); }
+.task-card.status-in_progress { border-left-color: var(--active); }
+.task-card.status-blocked { border-left-color: var(--blocked); }
+.task-card.status-completed { border-left-color: var(--done); }
+.task-card.status-failed { border-left-color: var(--error); }
+
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.task-id {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.task-description {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 8px 0;
+}
+
+.task-epic {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
+.task-worker {
+  font-size: 0.85rem;
+  color: var(--accent);
+  margin-top: 8px;
+}
+
+.task-error {
+  font-size: 0.85rem;
+  color: var(--error);
+  margin-top: 8px;
+}
+
+/* Workers */
+.workers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.worker-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 15px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.worker-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.worker-name {
+  font-weight: 600;
+}
+
+.worker-task {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.worker-id {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.worker-duration {
+  color: var(--accent);
+  font-family: monospace;
+}
+
+/* Dependency Graph */
+.dependency-graph {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
+  height: 500px;
+}
+
+.edge {
+  stroke: var(--border);
+  stroke-width: 2;
+}
+
+.node rect {
+  fill: var(--bg-hover);
+  stroke: var(--border);
+  stroke-width: 2;
+}
+
+.node.status-ready rect { stroke: var(--ready); }
+.node.status-claimed rect { stroke: var(--active); }
+.node.status-in_progress rect { stroke: var(--active); }
+.node.status-blocked rect { stroke: var(--blocked); }
+.node.status-completed rect { stroke: var(--done); }
+.node.status-failed rect { stroke: var(--error); }
+
+.node text {
+  fill: var(--text);
+  font-size: 12px;
+}
+
+/* Badge */
+.badge {
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge.open { background: var(--ready); color: white; }
+.badge.closed { background: var(--done); color: white; }
+.badge.ready { background: var(--ready); color: white; }
+.badge.claimed { background: var(--active); color: white; }
+.badge.in_progress { background: var(--active); color: white; }
+.badge.blocked { background: var(--blocked); color: white; }
+.badge.completed { background: var(--done); color: white; }
+.badge.failed { background: var(--error); color: white; }
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-muted);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}

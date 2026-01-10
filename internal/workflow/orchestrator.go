@@ -17,6 +17,7 @@ import (
 
 	"github.com/cloud-shuttle/drover/internal/beads"
 	"github.com/cloud-shuttle/drover/internal/config"
+	"github.com/cloud-shuttle/drover/internal/dashboard"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/internal/git"
@@ -151,6 +152,9 @@ func (o *Orchestrator) worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 				continue
 			}
 
+			// Broadcast task claimed to dashboard
+			dashboard.BroadcastTaskClaimed(task.ID, task.Title, workerID)
+
 			// Execute the task
 			o.executeTask(id, task)
 		}
@@ -193,6 +197,9 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	if err := o.store.UpdateTaskStatus(task.ID, types.TaskStatusInProgress, ""); err != nil {
 		log.Printf("Error updating task status: %v", err)
 	}
+
+	// Broadcast task started to dashboard
+	dashboard.BroadcastTaskStarted(task.ID, task.Title, workerIDStr)
 
 	// Ensure task is always marked complete or failed, even if we panic
 	defer func() {
@@ -277,6 +284,9 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	taskCompleted = true
 	duration := time.Since(start)
 	log.Printf("✅ Worker %d completed task %s in %v", workerID, task.ID, duration)
+
+	// Broadcast task completed to dashboard
+	dashboard.BroadcastTaskCompleted(task.ID, task.Title)
 
 	// Record task completion telemetry
 	telemetry.SetTaskStatus(taskSpan, "completed")
@@ -387,6 +397,7 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 	if err != nil {
 		log.Printf("Error fetching task %s: %v", taskID, err)
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
+		dashboard.BroadcastTaskFailed(taskID, taskID, errorMsg)
 		return false
 	}
 
@@ -394,6 +405,7 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 	if task.Attempts >= task.MaxAttempts {
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
 		log.Printf("❌ Task %s failed after %d attempts", taskID, task.Attempts)
+		dashboard.BroadcastTaskFailed(task.ID, task.Title, errorMsg)
 		return false
 	}
 
@@ -401,6 +413,7 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 	if err := o.store.IncrementTaskAttempts(taskID); err != nil {
 		log.Printf("Error incrementing attempts for task %s: %v", taskID, err)
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
+		dashboard.BroadcastTaskFailed(task.ID, task.Title, errorMsg)
 		return false
 	}
 
