@@ -2,6 +2,8 @@
 
 **Drive your project to completion with parallel AI agents.**
 
+![Drover](images/drover.png)
+
 Drover is a durable workflow orchestrator that runs multiple Claude Code agents in parallel to complete your entire project. It manages task dependencies, handles failures gracefully, and guarantees progress through crashes and restarts.
 
 > *"No task left behind."*
