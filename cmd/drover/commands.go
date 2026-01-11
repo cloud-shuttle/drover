@@ -16,8 +16,8 @@ import (
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/internal/template"
-	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/cloud-shuttle/drover/internal/workflow"
+	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/spf13/cobra"
 )
@@ -122,14 +122,21 @@ func runCmd() *cobra.Command {
 	var workers int
 	var epicID string
 	var verbose bool
+	var agentType string
+	var opencodeModel string
+	var opencodeURL string
 
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Execute all tasks to completion",
-		Long: `Run all tasks to completion using parallel Claude Code agents.
+		Long: `Run all tasks to completion using parallel AI agents.
 
 Tasks are executed respecting dependencies and priorities. Use --workers
 to control parallelism. Use --epic to filter execution to a specific epic.
+
+Agent Types:
+- claude-code (default): Use Claude Code CLI
+- opencode: Use OpenCode CLI
 
 DBOS Workflow Engine:
 - Default: SQLite-based orchestration (zero setup)
@@ -141,12 +148,30 @@ DBOS Workflow Engine:
 			}
 			defer store.Close()
 
-			// Override config if workers flag specified
+			// Override config if flags specified
 			runCfg := *cfg
 			if workers > 0 {
 				runCfg.Workers = workers
 			}
 			runCfg.Verbose = verbose
+
+			// Set agent type
+			if agentType != "" {
+				runCfg.AgentType = config.AgentType(agentType)
+			}
+
+			// Validate and set OpenCode model if using OpenCode
+			if runCfg.AgentType == config.AgentTypeOpenCode {
+				if opencodeModel != "" {
+					if err := config.ValidateOpenCodeModel(opencodeModel); err != nil {
+						return fmt.Errorf("invalid OpenCode model: %w", err)
+					}
+					runCfg.OpenCodeModel = opencodeModel
+				}
+				if opencodeURL != "" {
+					runCfg.OpenCodeURL = opencodeURL
+				}
+			}
 
 			// Check if DBOS mode is enabled via environment variable
 			dbosURL := os.Getenv("DBOS_SYSTEM_DATABASE_URL")
@@ -164,6 +189,9 @@ DBOS Workflow Engine:
 	cmd.Flags().IntVarP(&workers, "workers", "w", 0, "Number of parallel workers")
 	cmd.Flags().StringVar(&epicID, "epic", "", "Filter to specific epic")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging for debugging")
+	cmd.Flags().StringVar(&agentType, "agent-type", "", "Agent type to use: claude-code or opencode")
+	cmd.Flags().StringVar(&opencodeModel, "opencode-model", "", "OpenCode model in format provider/model (e.g., anthropic/claude-sonnet-4-20250514)")
+	cmd.Flags().StringVar(&opencodeURL, "opencode-url", "", "OpenCode server URL for remote execution")
 
 	return cmd
 }
@@ -279,11 +307,11 @@ func runWithSQLite(cmd *cobra.Command, runCfg *config.Config, store *db.Store, p
 
 func addCmd() *cobra.Command {
 	var (
-		desc      string
-		epicID    string
-		parentID  string
-		priority  int
-		blockedBy []string
+		desc           string
+		epicID         string
+		parentID       string
+		priority       int
+		blockedBy      []string
 		skipValidation bool
 	)
 
@@ -301,7 +329,7 @@ Hierarchical Tasks:
     drover add "Sub-task title" --parent task-123
 
 Maximum depth is 2 levels (Epic → Parent → Child).`,
-		Args:  cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, store, err := requireProject()
 			if err != nil {
@@ -541,10 +569,10 @@ and other metadata. Useful for inspecting individual task details.`,
 
 func resetCmd() *cobra.Command {
 	var (
-		resetCompleted bool
+		resetCompleted  bool
 		resetInProgress bool
-		resetClaimed bool
-		resetFailed bool
+		resetClaimed    bool
+		resetFailed     bool
 	)
 
 	command := &cobra.Command{
@@ -984,6 +1012,7 @@ func formatTimestamp(timestamp int64) string {
 	t := time.Unix(timestamp, 0)
 	return t.Format("2006-01-02 15:04:05")
 }
+
 // worktreeCmd returns the worktree management command
 func worktreeCmd() *cobra.Command {
 	cmd := &cobra.Command{

@@ -6,43 +6,43 @@ import "go.opentelemetry.io/otel/attribute"
 // Semantic convention keys for Drover-specific attributes
 const (
 	// Project attributes
-	KeyProjectID      = "drover.project.id"
-	KeyProjectPath    = "drover.project.path"
-	KeyProjectName    = "drover.project.name"
+	KeyProjectID   = "drover.project.id"
+	KeyProjectPath = "drover.project.path"
+	KeyProjectName = "drover.project.name"
 
 	// Workflow attributes
-	KeyWorkflowID     = "drover.workflow.id"
-	KeyWorkflowType   = "drover.workflow.type"
+	KeyWorkflowID   = "drover.workflow.id"
+	KeyWorkflowType = "drover.workflow.type"
 
 	// Task attributes
-	KeyTaskID         = "drover.task.id"
-	KeyTaskTitle      = "drover.task.title"
-	KeyTaskState      = "drover.task.state"
-	KeyTaskPriority   = "drover.task.priority"
-	KeyTaskAttempt    = "drover.task.attempt"
-	KeyEpicID         = "drover.epic.id"
+	KeyTaskID       = "drover.task.id"
+	KeyTaskTitle    = "drover.task.title"
+	KeyTaskState    = "drover.task.state"
+	KeyTaskPriority = "drover.task.priority"
+	KeyTaskAttempt  = "drover.task.attempt"
+	KeyEpicID       = "drover.epic.id"
 
 	// Worker attributes
-	KeyWorkerID       = "drover.worker.id"
-	KeyWorkerCount    = "drover.worker.count"
+	KeyWorkerID    = "drover.worker.id"
+	KeyWorkerCount = "drover.worker.count"
 
 	// Worktree attributes
-	KeyWorktreePath   = "drover.worktree.path"
-	KeyWorktreeID     = "drover.worktree.id"
+	KeyWorktreePath = "drover.worktree.path"
+	KeyWorktreeID   = "drover.worktree.id"
 
 	// Agent attributes
-	KeyAgentType      = "drover.agent.type"
-	KeyAgentModel     = "drover.agent.model"
-	KeyAgentPromptID  = "drover.agent.prompt.id"
+	KeyAgentType     = "drover.agent.type"
+	KeyAgentModel    = "drover.agent.model"
+	KeyAgentPromptID = "drover.agent.prompt.id"
 
 	// Blocker attributes
-	KeyBlockerType    = "drover.blocker.type"
-	KeyBlockerTaskID  = "drover.blocker.task_id"
-	KeyBlockerReason  = "drover.blocker.reason"
+	KeyBlockerType   = "drover.blocker.type"
+	KeyBlockerTaskID = "drover.blocker.task_id"
+	KeyBlockerReason = "drover.blocker.reason"
 
 	// Error attributes
-	KeyErrorType      = "drover.error.type"
-	KeyErrorCategory  = "drover.error.category"
+	KeyErrorType     = "drover.error.type"
+	KeyErrorCategory = "drover.error.category"
 )
 
 // Common attribute key values
@@ -54,14 +54,15 @@ const (
 	// Agent types
 	AgentTypeClaudeCode = "claude-code"
 	AgentTypeClaudeAPI  = "claude-api"
+	AgentTypeOpenCode   = "opencode"
 
 	// Error categories
-	ErrorCategoryAgent     = "agent"
-	ErrorCategoryGit       = "git"
-	ErrorCategoryWorktree  = "worktree"
-	ErrorCategoryDatabase  = "database"
-	ErrorCategoryTimeout   = "timeout"
-	ErrorCategoryUnknown   = "unknown"
+	ErrorCategoryAgent    = "agent"
+	ErrorCategoryGit      = "git"
+	ErrorCategoryWorktree = "worktree"
+	ErrorCategoryDatabase = "database"
+	ErrorCategoryTimeout  = "timeout"
+	ErrorCategoryUnknown  = "unknown"
 )
 
 // TaskAttrs returns a set of attributes for a task

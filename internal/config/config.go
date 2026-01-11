@@ -5,7 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+)
+
+// AgentType represents the AI agent to use for task execution
+type AgentType string
+
+const (
+	AgentTypeClaudeCode AgentType = "claude-code"
+	AgentTypeOpenCode   AgentType = "opencode"
 )
 
 // Config holds Drover configuration
@@ -21,16 +30,20 @@ type Config struct {
 	MaxTaskAttempts int
 
 	// Retry settings
-	ClaimTimeout  time.Duration
-	StallTimeout  time.Duration
-	PollInterval  time.Duration
-	AutoUnblock   bool
+	ClaimTimeout time.Duration
+	StallTimeout time.Duration
+	PollInterval time.Duration
+	AutoUnblock  bool
 
 	// Git settings
 	WorktreeDir string
 
-	// Claude settings
-	ClaudePath string
+	// Agent settings
+	AgentType     AgentType // "claude-code" or "opencode"
+	ClaudePath    string    // Path to Claude CLI (default: "claude")
+	OpenCodePath  string    // Path to OpenCode CLI (default: "opencode")
+	OpenCodeModel string    // Model in format "provider/model" (e.g., "anthropic/claude-sonnet-4-20250514")
+	OpenCodeURL   string    // Optional remote OpenCode server URL
 
 	// Beads sync settings
 	AutoSyncBeads bool
@@ -55,7 +68,10 @@ func Load() (*Config, error) {
 		AutoUnblock:     true,
 		WorktreeDir:     ".drover/worktrees",
 		ClaudePath:      "claude",
-		AutoSyncBeads:   false, // Default to off for backwards compatibility
+		OpenCodePath:    "opencode",
+		OpenCodeModel:   "anthropic/claude-sonnet-4-20250514",
+		AgentType:       AgentTypeClaudeCode,
+		AutoSyncBeads:   false,
 	}
 
 	// Environment overrides
@@ -70,6 +86,21 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DROVER_AUTO_SYNC_BEADS"); v != "" {
 		cfg.AutoSyncBeads = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_AGENT_TYPE"); v != "" {
+		cfg.AgentType = AgentType(v)
+	}
+	if v := os.Getenv("DROVER_CLAUDE_PATH"); v != "" {
+		cfg.ClaudePath = v
+	}
+	if v := os.Getenv("DROVER_OPENCODE_PATH"); v != "" {
+		cfg.OpenCodePath = v
+	}
+	if v := os.Getenv("DROVER_OPENCODE_MODEL"); v != "" {
+		cfg.OpenCodeModel = v
+	}
+	if v := os.Getenv("DROVER_OPENCODE_URL"); v != "" {
+		cfg.OpenCodeURL = v
 	}
 
 	return cfg, nil
@@ -98,4 +129,21 @@ func parseDurationOrDefault(s string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// ValidateOpenCodeModel validates that the model format is "provider/model"
+func ValidateOpenCodeModel(model string) error {
+	parts := strings.Split(model, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("invalid OpenCode model format: %s (expected provider/model, e.g., anthropic/claude-sonnet-4-20250514)", model)
+	}
+	return nil
+}
+
+// GetAgentExecutorPath returns the path to the agent CLI based on agent type
+func (c *Config) GetAgentExecutorPath() string {
+	if c.AgentType == AgentTypeOpenCode {
+		return c.OpenCodePath
+	}
+	return c.ClaudePath
 }
