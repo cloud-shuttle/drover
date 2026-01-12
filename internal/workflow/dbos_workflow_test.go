@@ -70,7 +70,8 @@ func setupDBOSTestEnvironment(t *testing.T) (string, dbos.DBOSContext, *workflow
 
 	// Create config
 	cfg := &config.Config{
-		ClaudePath:   mockClaude,
+		AgentType:    "claude",
+		AgentPath:    mockClaude,
 		TaskTimeout:  10 * time.Second,
 		Workers:      1,
 		WorktreeDir:  filepath.Join(tmpDir, ".drover", "worktrees"),
@@ -465,7 +466,8 @@ func TestDBOSOrchestrator_TaskFailure(t *testing.T) {
 
 	// Create config
 	cfg := &config.Config{
-		ClaudePath:   mockClaude,
+		AgentType:    "claude",
+		AgentPath:    mockClaude,
 		TaskTimeout:  10 * time.Second,
 		Workers:      1,
 		WorktreeDir:  filepath.Join(tmpDir, ".drover", "worktrees"),
@@ -557,7 +559,8 @@ func TestDBOSOrchestrator_TaskRetry(t *testing.T) {
 
 	// Create config
 	cfg := &config.Config{
-		ClaudePath:   mockClaude,
+		AgentType:    "claude",
+		AgentPath:    mockClaude,
 		TaskTimeout:  10 * time.Second,
 		Workers:      1,
 		WorktreeDir:  filepath.Join(tmpDir, ".drover", "worktrees"),
@@ -658,7 +661,8 @@ func BenchmarkDBOS_Sequential(b *testing.B) {
 	}
 
 	cfg := &config.Config{
-		ClaudePath:   mockClaude,
+		AgentType:    "claude",
+		AgentPath:    mockClaude,
 		TaskTimeout:  10 * time.Second,
 		Workers:      1,
 		WorktreeDir:  filepath.Join(tmpDir, ".drover", "worktrees"),
@@ -732,7 +736,8 @@ func BenchmarkDBOS_Queue(b *testing.B) {
 	}
 
 	cfg := &config.Config{
-		ClaudePath:   mockClaude,
+		AgentType:    "claude",
+		AgentPath:    mockClaude,
 		TaskTimeout:  10 * time.Second,
 		Workers:      1,
 		WorktreeDir:  filepath.Join(tmpDir, ".drover", "worktrees"),

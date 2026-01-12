@@ -29,8 +29,10 @@ type Config struct {
 	// Git settings
 	WorktreeDir string
 
-	// Claude settings
-	ClaudePath string
+	// Agent settings
+	AgentType  string  // "claude", "codex", or "amp"
+	AgentPath  string  // path to agent binary
+	ClaudePath string  // deprecated: use AgentPath instead
 
 	// Beads sync settings
 	AutoSyncBeads bool
@@ -54,8 +56,10 @@ func Load() (*Config, error) {
 		PollInterval:    2 * time.Second,
 		AutoUnblock:     true,
 		WorktreeDir:     ".drover/worktrees",
-		ClaudePath:      "claude",
-		AutoSyncBeads:   false, // Default to off for backwards compatibility
+		AgentType:       "claude", // Default to Claude for backwards compatibility
+		AgentPath:       "claude", // Will be resolved based on AgentType
+		ClaudePath:      "claude", // Deprecated but kept for backwards compatibility
+		AutoSyncBeads:   false,    // Default to off for backwards compatibility
 	}
 
 	// Environment overrides
@@ -70,6 +74,27 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DROVER_AUTO_SYNC_BEADS"); v != "" {
 		cfg.AutoSyncBeads = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_AGENT_TYPE"); v != "" {
+		cfg.AgentType = v
+	}
+	if v := os.Getenv("DROVER_AGENT_PATH"); v != "" {
+		cfg.AgentPath = v
+	} else if v := os.Getenv("DROVER_CLAUDE_PATH"); v != "" {
+		// Deprecated: DROVER_CLAUDE_PATH for backwards compatibility
+		cfg.AgentPath = v
+		cfg.ClaudePath = v
+	}
+
+	// Resolve AgentPath based on AgentType if not explicitly set
+	if cfg.AgentPath == "claude" && cfg.AgentType != "claude" {
+		// AgentPath wasn't explicitly set, use default for the agent type
+		switch cfg.AgentType {
+		case "codex":
+			cfg.AgentPath = "codex"
+		case "amp":
+			cfg.AgentPath = "amp"
+		}
 	}
 
 	return cfg, nil

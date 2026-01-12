@@ -1389,11 +1389,6 @@ func formatBytes(bytes int64) string {
 	return fmt.Sprintf("%.1f %s", value, units[unitIndex])
 }
 
-// runDashboard starts the web dashboard (implementation pending)
-func runDashboard(store *db.Store, port string, open bool) error {
-	return fmt.Errorf("dashboard feature is not yet implemented in this release")
-}
-
 // dashboardCmd starts the web dashboard
 func dashboardCmd() *cobra.Command {
 	var (

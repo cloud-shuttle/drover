@@ -27,14 +27,14 @@ import (
 
 // Orchestrator manages the main execution loop
 type Orchestrator struct {
-	config          *config.Config
-	store           *db.Store
-	git             *git.WorktreeManager
-	executor        *executor.Executor
-	workers         int
-	verbose         bool // Enable verbose logging
-	projectDir      string // Project directory for beads sync
-	epicID          string // Optional epic filter for task execution
+	config   *config.Config
+	store    *db.Store
+	git      *git.WorktreeManager
+	agent    executor.Agent // Agent interface for Claude/Codex/Amp
+	workers  int
+	verbose  bool // Enable verbose logging
+	projectDir string // Project directory for beads sync
+	epicID   string // Optional epic filter for task execution
 }
 
 // NewOrchestrator creates a new workflow orchestrator
@@ -45,19 +45,29 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 	)
 	gitMgr.SetVerbose(cfg.Verbose)
 
-	exec := executor.NewExecutor(cfg.ClaudePath, cfg.TaskTimeout)
-	exec.SetVerbose(cfg.Verbose)
+	// Create the agent based on configuration
+	agent, err := executor.NewAgent(&executor.AgentConfig{
+		Type:    cfg.AgentType,
+		Path:    cfg.AgentPath,
+		Timeout: cfg.TaskTimeout,
+		Verbose: cfg.Verbose,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating agent: %w", err)
+	}
 
-	// Check Claude is installed
-	if err := executor.CheckClaudeInstalled(cfg.ClaudePath); err != nil {
-		return nil, fmt.Errorf("checking claude: %w", err)
+	agent.SetVerbose(cfg.Verbose)
+
+	// Check agent is installed
+	if err := agent.CheckInstalled(); err != nil {
+		return nil, fmt.Errorf("checking %s: %w", cfg.AgentType, err)
 	}
 
 	return &Orchestrator{
 		config:     cfg,
 		store:      store,
 		git:        gitMgr,
-		executor:   exec,
+		agent:      agent,
 		workers:    cfg.Workers,
 		verbose:    cfg.Verbose,
 		projectDir: projectDir,
@@ -228,7 +238,7 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	defer o.git.Remove(task.ID)
 
 	// Execute Claude Code and capture the result
-	result := o.executor.ExecuteWithTimeout(taskCtx, worktreePath, task, taskSpan)
+	result := o.agent.ExecuteWithContext(taskCtx, worktreePath, task, taskSpan)
 	if !result.Success {
 		log.Printf("❌ Task %s failed: claude execution: %v", task.ID, result.Error)
 		telemetry.RecordError(taskSpan, result.Error, "AgentExecutionFailed", "agent")
@@ -342,7 +352,7 @@ func (o *Orchestrator) executeSubTasks(workerID int, parentTask *types.Task) boo
 		telemetry.RecordTaskClaimed(taskCtx, fmt.Sprintf("worker-%d", workerID), parentTask.EpicID)
 		defer taskSpan.End()
 
-		result := o.executor.ExecuteWithTimeout(taskCtx, worktreePath, subTask, taskSpan)
+		result := o.agent.ExecuteWithContext(taskCtx, worktreePath, subTask, taskSpan)
 
 		// Clean up worktree
 		o.git.Remove(subTask.ID)

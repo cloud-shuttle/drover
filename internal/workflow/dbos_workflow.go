@@ -64,7 +64,7 @@ type QueueStats struct {
 type DBOSOrchestrator struct {
 	config         *config.Config
 	git            *git.WorktreeManager
-	executor       *executor.Executor
+	agent          executor.Agent // Agent interface for Claude/Codex/Amp
 	dbosCtx        dbos.DBOSContext
 	queue          dbos.WorkflowQueue
 	store          *db.Store // SQLite store for worktree tracking
@@ -81,12 +81,22 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 	)
 	gitMgr.SetVerbose(cfg.Verbose)
 
-	exec := executor.NewExecutor(cfg.ClaudePath, cfg.TaskTimeout)
-	exec.SetVerbose(cfg.Verbose)
+	// Create the agent based on configuration
+	agent, err := executor.NewAgent(&executor.AgentConfig{
+		Type:    cfg.AgentType,
+		Path:    cfg.AgentPath,
+		Timeout: cfg.TaskTimeout,
+		Verbose: cfg.Verbose,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating agent: %w", err)
+	}
 
-	// Check Claude is installed
-	if err := executor.CheckClaudeInstalled(cfg.ClaudePath); err != nil {
-		return nil, fmt.Errorf("checking claude: %w", err)
+	agent.SetVerbose(cfg.Verbose)
+
+	// Check agent is installed
+	if err := agent.CheckInstalled(); err != nil {
+		return nil, fmt.Errorf("checking %s: %w", cfg.AgentType, err)
 	}
 
 	// Create a workflow queue for parallel task execution
@@ -98,7 +108,7 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 	return &DBOSOrchestrator{
 		config:        cfg,
 		git:           gitMgr,
-		executor:      exec,
+		agent:         agent,
 		dbosCtx:       dbosCtx,
 		queue:         queue,
 		store:         store,
@@ -511,7 +521,7 @@ func (o *DBOSOrchestrator) createWorktreeStep(ctx context.Context, task TaskInpu
 // executeClaudeStep runs Claude Code in the worktree
 // This is a step function - must accept only context.Context
 func (o *DBOSOrchestrator) executeClaudeStep(ctx context.Context, worktreePath string, task TaskInput, parentSpan trace.Span) (*executor.ExecutionResult, error) {
-	result := o.executor.ExecuteWithTimeout(ctx, worktreePath, &types.Task{
+	result := o.agent.ExecuteWithContext(ctx, worktreePath, &types.Task{
 		ID:          task.TaskID,
 		Title:       task.Title,
 		Description: task.Description,

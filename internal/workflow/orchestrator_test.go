@@ -117,7 +117,8 @@ exit 0
 
 	// Create config
 	cfg := &config.Config{
-		ClaudePath:   mockClaude,
+		AgentType:    "claude",
+		AgentPath:    mockClaude,
 		TaskTimeout:  5 * time.Second,
 		Workers:      1,
 		WorktreeDir:  filepath.Join(tmpDir, ".drover", "worktrees"),
@@ -298,7 +299,8 @@ exit 1
 
 	// Create config with failing claude
 	cfg := &config.Config{
-		ClaudePath:   mockClaude,
+		AgentType:    "claude",
+		AgentPath:    mockClaude,
 		TaskTimeout:  5 * time.Second,
 		Workers:      1,
 		WorktreeDir:  filepath.Join(tmpDir, ".drover", "worktrees"),
@@ -392,7 +394,8 @@ exit 0
 
 	// Create config
 	cfg := &config.Config{
-		ClaudePath:   mockClaude,
+		AgentType:    "claude",
+		AgentPath:    mockClaude,
 		TaskTimeout:  5 * time.Second,
 		Workers:      1,
 		WorktreeDir:  filepath.Join(tmpDir, ".drover", "worktrees"),
