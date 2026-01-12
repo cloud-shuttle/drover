@@ -39,11 +39,12 @@ type Config struct {
 	WorktreeDir string
 
 	// Agent settings
-	AgentType     AgentType // "claude-code" or "opencode"
-	ClaudePath    string    // Path to Claude CLI (default: "claude")
-	OpenCodePath  string    // Path to OpenCode CLI (default: "opencode")
-	OpenCodeModel string    // Model in format "provider/model" (e.g., "anthropic/claude-sonnet-4-20250514")
-	OpenCodeURL   string    // Optional remote OpenCode server URL
+	AgentType         AgentType // "claude-code" or "opencode"
+	ClaudePath        string    // Path to Claude CLI (default: "claude")
+	OpenCodePath      string    // Path to OpenCode CLI (default: "opencode")
+	OpenCodeModel     string    // Model in format "provider/model" (e.g., "anthropic/claude-sonnet-4-20250514")
+	OpenCodeURL       string    // Optional remote OpenCode server URL
+	MergeTargetBranch string    // Branch to merge changes to (default: "main")
 
 	// Beads sync settings
 	AutoSyncBeads bool
@@ -58,20 +59,21 @@ type Config struct {
 // Load loads configuration from environment and defaults
 func Load() (*Config, error) {
 	cfg := &Config{
-		DatabaseURL:     defaultDatabaseURL(),
-		Workers:         3,
-		TaskTimeout:     60 * time.Minute,
-		MaxTaskAttempts: 3,
-		ClaimTimeout:    5 * time.Minute,
-		StallTimeout:    5 * time.Minute,
-		PollInterval:    2 * time.Second,
-		AutoUnblock:     true,
-		WorktreeDir:     ".drover/worktrees",
-		ClaudePath:      "claude",
-		OpenCodePath:    "opencode",
-		OpenCodeModel:   "anthropic/claude-sonnet-4-20250514",
-		AgentType:       AgentTypeClaudeCode,
-		AutoSyncBeads:   false,
+		DatabaseURL:       defaultDatabaseURL(),
+		Workers:           3,
+		TaskTimeout:       60 * time.Minute,
+		MaxTaskAttempts:   3,
+		ClaimTimeout:      5 * time.Minute,
+		StallTimeout:      5 * time.Minute,
+		PollInterval:      2 * time.Second,
+		AutoUnblock:       true,
+		WorktreeDir:       ".drover/worktrees",
+		ClaudePath:        "claude",
+		OpenCodePath:      "opencode",
+		OpenCodeModel:     "anthropic/claude-sonnet-4-20250514",
+		AgentType:         AgentTypeClaudeCode,
+		MergeTargetBranch: "main",
+		AutoSyncBeads:     false,
 	}
 
 	// Environment overrides
@@ -101,6 +103,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DROVER_OPENCODE_URL"); v != "" {
 		cfg.OpenCodeURL = v
+	}
+	if v := os.Getenv("DROVER_MERGE_TARGET_BRANCH"); v != "" {
+		cfg.MergeTargetBranch = v
 	}
 
 	return cfg, nil

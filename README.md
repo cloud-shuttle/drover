@@ -58,8 +58,32 @@ drover run --epic epic-a1b2
 
 - Go 1.22+
 - Git
-- [Claude Code CLI](https://claude.ai/code) installed and authenticated
+- AI Agent CLI (Claude Code or OpenCode) installed and authenticated
 - PostgreSQL (production) or SQLite (local dev, default)
+
+#### Supported AI Agents
+
+Drover supports two AI agents for task execution:
+
+**Claude Code (Default)**
+```bash
+# Install
+curl -sSL https://claude.com/install | sh
+
+# Authenticate
+claude auth login
+```
+
+**OpenCode (Alternative)**
+```bash
+# Install
+curl -fsSL https://opencode.ai/install | bash
+
+# Authenticate (supports Anthropic, OpenAI, Google, etc.)
+opencode auth login
+```
+
+Both agents work identically with Drover. Use whichever you prefer.
 
 ### From Source
 
@@ -83,6 +107,8 @@ go install github.com/cloud-shuttle/drover@latest
 | `drover run` | Execute all tasks to completion |
 | `drover run --workers 8` | Run with 8 parallel agents |
 | `drover run --epic <id>` | Run only tasks in specific epic |
+| `drover run --agent-type opencode` | Run with OpenCode instead of Claude Code |
+| `drover run --opencode-model anthropic/claude-sonnet-4-20250514` | Specify OpenCode model |
 | `drover add <title>` | Add a new task |
 | `drover add <title> --parent <id>` | Add a sub-task to parent |
 | `drover add "task-123.N title"` | Add sub-task with hierarchical syntax |
@@ -104,7 +130,41 @@ export DROVER_DATABASE_URL="postgresql://localhost/drover"
 
 # Or use SQLite explicitly
 export DROVER_DATABASE_URL="sqlite:///.drover.db"
+
+# Agent selection (default: claude-code)
+export DROVER_AGENT_TYPE="opencode"                      # "claude-code" or "opencode"
+export DROVER_OPENCODE_MODEL="anthropic/claude-sonnet-4-20250514"
+export DROVER_OPENCODE_PATH="/usr/local/bin/opencode"
+export DROVER_OPENCODE_URL="http://localhost:4096"       # Remote server for parallel execution
 ```
+
+### Agent Selection
+
+Drover defaults to Claude Code but supports OpenCode as an alternative. You can switch agents via flags or environment variables:
+
+```bash
+# Use Claude Code (default)
+drover run
+
+# Use OpenCode with specific model
+drover run --agent-type opencode --opencode-model anthropic/claude-sonnet-4-20250514
+
+# Use OpenCode with remote server (for better parallel execution)
+drover run --agent-type opencode --opencode-url http://localhost:4096
+```
+
+#### OpenCode Model Format
+
+OpenCode uses `provider/model` format for model selection. Some common providers:
+
+| Provider | Example Model |
+|----------|---------------|
+| Anthropic | `anthropic/claude-sonnet-4-20250514` |
+| OpenAI | `openai/gpt-4o` |
+| Google | `google/gemini-2.5-pro` |
+| OpenCode (free) | `opencode/grok-code` |
+
+Use `opencode models --refresh` to list all available models from your configured providers.
 
 ### Observability
 
@@ -349,7 +409,7 @@ Drover is built on a pure Go stack:
 | CLI | Cobra | Command-line interface |
 | Workflows | DBOS Go | Durable execution |
 | Database | PostgreSQL/SQLite | State persistence |
-| AI Agent | Claude Code | Task execution |
+| AI Agent | Claude Code / OpenCode | Task execution |
 | Isolation | Git Worktrees | Parallel workspaces |
 | Observability | OpenTelemetry | Traces & metrics |
 

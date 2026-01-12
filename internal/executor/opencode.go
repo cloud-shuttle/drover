@@ -71,6 +71,13 @@ func (e *OpenCodeExecutor) Execute(worktreePath string, task *types.Task) *Execu
 	return e.ExecuteWithContext(ctx, worktreePath, task)
 }
 
+func (e *OpenCodeExecutor) ExecuteWithTimeout(parentCtx context.Context, worktreePath string, task *types.Task, parentSpan ...trace.Span) *ExecutionResult {
+	ctx, cancel := context.WithTimeout(parentCtx, e.timeout)
+	defer cancel()
+
+	return e.ExecuteWithContext(ctx, worktreePath, task, parentSpan...)
+}
+
 func (e *OpenCodeExecutor) ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task, parentSpan ...trace.Span) *ExecutionResult {
 	var agentCtx context.Context
 	var span trace.Span

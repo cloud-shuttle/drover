@@ -2,6 +2,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log"
@@ -11,7 +12,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Global mutex to serialize MergeToMain operations across all workers
@@ -51,8 +54,12 @@ func (wm *WorktreeManager) GetMergeTargetBranch() string {
 
 // EnsureMainBranch ensures the repository has a main branch
 // For empty repos, this creates an orphan main branch with an initial commit
-func (wm *WorktreeManager) EnsureMainBranch() error {
+func (wm *WorktreeManager) EnsureMainBranch(ctx context.Context) error {
+	ctx, span := telemetry.StartGitSpan(ctx, telemetry.SpanGitEnsureMain)
+	defer span.End()
+
 	targetBranch := wm.GetMergeTargetBranch()
+	span.SetAttributes(attribute.String("git.branch", targetBranch))
 
 	// Check if target branch exists
 	cmd := exec.Command("git", "rev-parse", "--verify", targetBranch)
@@ -111,7 +118,7 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 	hadCommits := err == nil
 
 	// Ensure main branch exists (handles empty repos)
-	if err := wm.EnsureMainBranch(); err != nil {
+	if err := wm.EnsureMainBranch(context.Background()); err != nil {
 		return "", fmt.Errorf("ensuring main branch: %w", err)
 	}
 
@@ -258,7 +265,10 @@ func (wm *WorktreeManager) Commit(taskID, message string) (bool, error) {
 }
 
 // MergeToMain merges the worktree changes to main branch
-func (wm *WorktreeManager) MergeToMain(taskID string) error {
+func (wm *WorktreeManager) MergeToMain(ctx context.Context, taskID string) error {
+	ctx, span := telemetry.StartGitSpan(ctx, telemetry.SpanGitWorktreeMerge, attribute.String("task.id", taskID))
+	defer span.End()
+
 	// Serialize merge operations to prevent git index lock conflicts
 	mergeMutex.Lock()
 	defer mergeMutex.Unlock()
@@ -268,9 +278,10 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 	cmd.Dir = wm.baseDir
 	_, err := cmd.Output()
 	hadCommits := err == nil
+	span.SetAttributes(attribute.Bool("repo.had_commits", hadCommits))
 
 	// Ensure target branch exists (safety check for empty repos)
-	if err := wm.EnsureMainBranch(); err != nil {
+	if err := wm.EnsureMainBranch(context.TODO()); err != nil {
 		return fmt.Errorf("ensuring target branch: %w", err)
 	}
 

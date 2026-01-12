@@ -2,6 +2,7 @@
 package git_test
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -267,12 +268,12 @@ func TestWorktreeManager_MergeToMain_WithChanges(t *testing.T) {
 	}
 
 	// Merge to main
-	err = wm.MergeToMain(task.ID)
+	err = wm.MergeToMain(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("Failed to merge to main: %v", err)
 	}
 
-	// Verify the file exists in main
+	// Verify file exists in main
 	mainFile := filepath.Join(baseDir, "merge-test.txt")
 	if _, err := os.Stat(mainFile); os.IsNotExist(err) {
 		t.Error("File was not merged to main branch")
@@ -308,7 +309,7 @@ func TestWorktreeManager_MergeToMain_NoChanges(t *testing.T) {
 	defer wm.Remove(task.ID)
 
 	// Merge should succeed even with no changes
-	err = wm.MergeToMain(task.ID)
+	err = wm.MergeToMain(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("Merge with no changes should succeed, got: %v", err)
 	}
@@ -475,7 +476,7 @@ func TestEnsureMainBranch_EmptyRepo(t *testing.T) {
 	}
 
 	// Ensure main branch
-	err = wm.EnsureMainBranch()
+	err = wm.EnsureMainBranch(context.Background())
 	if err != nil {
 		t.Fatalf("EnsureMainBranch failed: %v", err)
 	}
@@ -617,7 +618,7 @@ func TestWorktreeManager_MergeToMain_EmptyRepo(t *testing.T) {
 	}
 
 	// Merge to main
-	err = wm.MergeToMain(task.ID)
+	err = wm.MergeToMain(context.Background(), task.ID)
 	if err != nil {
 		t.Fatalf("Failed to merge to main: %v", err)
 	}
@@ -677,7 +678,7 @@ func TestWorktreeManager_MergeToMain_WithoutCreate(t *testing.T) {
 	}
 
 	// Merge to main - should create main branch automatically
-	err := wm.MergeToMain(taskID)
+	err := wm.MergeToMain(context.Background(), taskID)
 	if err != nil {
 		t.Fatalf("MergeToMain failed without Create being called: %v", err)
 	}

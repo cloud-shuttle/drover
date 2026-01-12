@@ -12,6 +12,7 @@ import (
 // AgentExecutor defines the interface for executing AI agent tasks
 type AgentExecutor interface {
 	Execute(worktreePath string, task *types.Task) *ExecutionResult
+	ExecuteWithTimeout(parentCtx context.Context, worktreePath string, task *types.Task, parentSpan ...trace.Span) *ExecutionResult
 	ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task, parentSpan ...trace.Span) *ExecutionResult
 }
 

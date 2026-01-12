@@ -27,14 +27,14 @@ import (
 
 // Orchestrator manages the main execution loop
 type Orchestrator struct {
-	config          *config.Config
-	store           *db.Store
-	git             *git.WorktreeManager
-	executor        *executor.Executor
-	workers         int
-	verbose         bool // Enable verbose logging
-	projectDir      string // Project directory for beads sync
-	epicID          string // Optional epic filter for task execution
+	config     *config.Config
+	store      *db.Store
+	git        *git.WorktreeManager
+	executor   executor.AgentExecutor
+	workers    int
+	verbose    bool   // Enable verbose logging
+	projectDir string // Project directory for beads sync
+	epicID     string // Optional epic filter for task execution
 }
 
 // NewOrchestrator creates a new workflow orchestrator
@@ -45,12 +45,20 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 	)
 	gitMgr.SetVerbose(cfg.Verbose)
 
-	exec := executor.NewExecutor(cfg.ClaudePath, cfg.TaskTimeout)
-	exec.SetVerbose(cfg.Verbose)
+	exec, err := executor.NewAgentExecutor(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating agent executor: %w", err)
+	}
 
-	// Check Claude is installed
-	if err := executor.CheckClaudeInstalled(cfg.ClaudePath); err != nil {
-		return nil, fmt.Errorf("checking claude: %w", err)
+	// Check agent is installed based on type
+	if cfg.AgentType == config.AgentTypeClaudeCode {
+		if err := executor.CheckClaudeInstalled(cfg.ClaudePath); err != nil {
+			return nil, fmt.Errorf("checking claude: %w", err)
+		}
+	} else if cfg.AgentType == config.AgentTypeOpenCode {
+		if err := executor.CheckOpenCodeInstalled(cfg.OpenCodePath); err != nil {
+			return nil, fmt.Errorf("checking opencode: %w", err)
+		}
 	}
 
 	return &Orchestrator{
@@ -269,7 +277,7 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	}
 
 	// Try to merge to main (if there are changes to merge)
-	if err := o.git.MergeToMain(task.ID); err != nil {
+	if err := o.git.MergeToMain(taskCtx, task.ID); err != nil {
 		// Log merge error but continue - task completed successfully even if merge failed
 		log.Printf("⚠️  Task %s completed but merge failed: %v", task.ID, err)
 		telemetry.RecordError(taskSpan, err, "MergeFailed", "git")
@@ -367,7 +375,7 @@ func (o *Orchestrator) executeSubTasks(workerID int, parentTask *types.Task) boo
 		}
 
 		// Try to merge to main
-		if err := o.git.MergeToMain(subTask.ID); err != nil {
+		if err := o.git.MergeToMain(taskCtx, subTask.ID); err != nil {
 			log.Printf("⚠️  Sub-task %s completed but merge failed: %v", subTask.ID, err)
 			telemetry.RecordError(taskSpan, err, "MergeFailed", "git")
 		}

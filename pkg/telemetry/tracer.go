@@ -29,9 +29,9 @@ const (
 	SpanTaskRetry    = "drover.task.retry"
 
 	// Worker spans
-	SpanWorkerRun    = "drover.worker.run"
-	SpanWorkerPoll   = "drover.worker.poll"
-	SpanWorkerLoop   = "drover.worker.loop"
+	SpanWorkerRun  = "drover.worker.run"
+	SpanWorkerPoll = "drover.worker.poll"
+	SpanWorkerLoop = "drover.worker.loop"
 
 	// Worktree spans
 	SpanWorktreeCreate  = "drover.worktree.create"
@@ -39,9 +39,9 @@ const (
 	SpanWorktreeCleanup = "drover.worktree.cleanup"
 
 	// Agent spans
-	SpanAgentExecute     = "drover.agent.execute"
-	SpanAgentPrompt      = "drover.agent.prompt"
-	SpanAgentToolCall    = "drover.agent.tool_call"
+	SpanAgentExecute  = "drover.agent.execute"
+	SpanAgentPrompt   = "drover.agent.prompt"
+	SpanAgentToolCall = "drover.agent.tool_call"
 
 	// Blocker spans
 	SpanBlockerDetect    = "drover.blocker.detect"
@@ -49,9 +49,11 @@ const (
 	SpanBlockerCreateFix = "drover.blocker.create_fix_task"
 
 	// Git spans
-	SpanGitCommit    = "drover.git.commit"
-	SpanGitPush      = "drover.git.push"
-	SpanGitMerge     = "drover.git.merge"
+	SpanGitCommit        = "drover.git.commit"
+	SpanGitPush          = "drover.git.push"
+	SpanGitMerge         = "drover.git.merge"
+	SpanGitEnsureMain    = "drover.git.ensure_main"
+	SpanGitWorktreeMerge = "drover.git.worktree_merge"
 )
 
 // StartWorkflowSpan starts a span for workflow execution
@@ -86,6 +88,11 @@ func StartAgentSpan(ctx context.Context, agentType, model string, attrs ...attri
 // StartWorktreeSpan starts a span for worktree operations
 func StartWorktreeSpan(ctx context.Context, name, worktreePath string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	attrs = append(attrs, attribute.String(KeyWorktreePath, worktreePath))
+	return tracer.Start(ctx, name, trace.WithAttributes(attrs...))
+}
+
+// StartGitSpan starts a span for git operations
+func StartGitSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	return tracer.Start(ctx, name, trace.WithAttributes(attrs...))
 }
 

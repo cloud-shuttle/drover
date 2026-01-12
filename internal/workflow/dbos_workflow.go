@@ -62,15 +62,15 @@ type QueueStats struct {
 
 // DBOSOrchestrator manages workflow execution using DBOS
 type DBOSOrchestrator struct {
-	config         *config.Config
-	git            *git.WorktreeManager
-	executor       *executor.Executor
-	dbosCtx        dbos.DBOSContext
-	queue          dbos.WorkflowQueue
-	store          *db.Store // SQLite store for worktree tracking
-	verbose        bool
-	dependencyMap  map[string][]string // taskID -> list of dependent task IDs
-	dependencyMu   sync.RWMutex
+	config        *config.Config
+	git           *git.WorktreeManager
+	executor      executor.AgentExecutor
+	dbosCtx       dbos.DBOSContext
+	queue         dbos.WorkflowQueue
+	store         *db.Store // SQLite store for worktree tracking
+	verbose       bool
+	dependencyMap map[string][]string // taskID -> list of dependent task IDs
+	dependencyMu  sync.RWMutex
 }
 
 // NewDBOSOrchestrator creates a new DBOS-based orchestrator
@@ -81,12 +81,20 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 	)
 	gitMgr.SetVerbose(cfg.Verbose)
 
-	exec := executor.NewExecutor(cfg.ClaudePath, cfg.TaskTimeout)
-	exec.SetVerbose(cfg.Verbose)
+	exec, err := executor.NewAgentExecutor(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("creating agent executor: %w", err)
+	}
 
-	// Check Claude is installed
-	if err := executor.CheckClaudeInstalled(cfg.ClaudePath); err != nil {
-		return nil, fmt.Errorf("checking claude: %w", err)
+	// Check agent is installed based on type
+	if cfg.AgentType == config.AgentTypeClaudeCode {
+		if err := executor.CheckClaudeInstalled(cfg.ClaudePath); err != nil {
+			return nil, fmt.Errorf("checking claude: %w", err)
+		}
+	} else if cfg.AgentType == config.AgentTypeOpenCode {
+		if err := executor.CheckOpenCodeInstalled(cfg.OpenCodePath); err != nil {
+			return nil, fmt.Errorf("checking opencode: %w", err)
+		}
 	}
 
 	// Create a workflow queue for parallel task execution
@@ -554,7 +562,7 @@ func (o *DBOSOrchestrator) commitChangesStep(ctx context.Context, task TaskInput
 // mergeToMainStep merges the worktree changes to main branch
 // This is a step function - must accept only context.Context
 func (o *DBOSOrchestrator) mergeToMainStep(ctx context.Context, taskID string) (bool, error) {
-	err := o.git.MergeToMain(taskID)
+	err := o.git.MergeToMain(ctx, taskID)
 	if err != nil {
 		return false, fmt.Errorf("merging to main: %w", err)
 	}
