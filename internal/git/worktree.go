@@ -20,18 +20,69 @@ var mergeMutex sync.Mutex
 
 // WorktreeManager creates and manages git worktrees
 type WorktreeManager struct {
-	baseDir     string // Base repository directory
-	worktreeDir string // Where worktrees are created (.drover/worktrees)
-	verbose     bool   // Enable verbose logging
+	baseDir           string // Base repository directory
+	worktreeDir       string // Where worktrees are created (.drover/worktrees)
+	verbose           bool   // Enable verbose logging
+	mergeTargetBranch string // Branch to merge changes to (default: "main")
 }
 
 // NewWorktreeManager creates a new worktree manager
 func NewWorktreeManager(baseDir, worktreeDir string) *WorktreeManager {
 	return &WorktreeManager{
-		baseDir:     baseDir,
-		worktreeDir: worktreeDir,
-		verbose:     false,
+		baseDir:           baseDir,
+		worktreeDir:       worktreeDir,
+		verbose:           false,
+		mergeTargetBranch: "main",
 	}
+}
+
+// SetMergeTargetBranch sets the branch to merge changes to
+func (wm *WorktreeManager) SetMergeTargetBranch(branch string) {
+	wm.mergeTargetBranch = branch
+}
+
+// GetMergeTargetBranch returns the current merge target branch
+func (wm *WorktreeManager) GetMergeTargetBranch() string {
+	if wm.mergeTargetBranch == "" {
+		return "main"
+	}
+	return wm.mergeTargetBranch
+}
+
+// EnsureMainBranch ensures the repository has a main branch
+// For empty repos, this creates an orphan main branch with an initial commit
+func (wm *WorktreeManager) EnsureMainBranch() error {
+	targetBranch := wm.GetMergeTargetBranch()
+
+	// Check if target branch exists
+	cmd := exec.Command("git", "rev-parse", "--verify", targetBranch)
+	cmd.Dir = wm.baseDir
+	err := cmd.Run()
+
+	if err == nil {
+		// Target branch already exists
+		return nil
+	}
+
+	// No target branch exists, create it from orphan
+	log.Printf("🌱 Creating %s branch in empty repo", targetBranch)
+
+	cmd = exec.Command("git", "checkout", "--orphan", targetBranch)
+	cmd.Dir = wm.baseDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create %s branch: %w\n%s", targetBranch, err, output)
+	}
+
+	// Create empty commit to establish branch
+	cmd = exec.Command("git", "commit", "--allow-empty", "-m", "Initial commit")
+	cmd.Dir = wm.baseDir
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create initial commit: %w\n%s", err, output)
+	}
+
+	log.Printf("✅ Created %s branch with initial commit", targetBranch)
+
+	return nil
 }
 
 // SetVerbose enables or disables verbose logging
@@ -52,10 +103,33 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 	// This handles stale worktrees from interrupted runs
 	wm.cleanUpWorktree(task.ID)
 
-	// Create the worktree
-	cmd := exec.Command("git", "worktree", "add", worktreePath)
+	// Check if repository has any commits BEFORE ensuring main branch
+	// This determines if we need to handle empty repo specially
+	cmd := exec.Command("git", "rev-parse", "HEAD")
 	cmd.Dir = wm.baseDir
-	output, err := cmd.CombinedOutput()
+	_, err := cmd.Output()
+	hadCommits := err == nil
+
+	// Ensure main branch exists (handles empty repos)
+	if err := wm.EnsureMainBranch(); err != nil {
+		return "", fmt.Errorf("ensuring main branch: %w", err)
+	}
+
+	var output []byte
+	if hadCommits {
+		// Repository had commits before, create worktree from HEAD
+		cmd = exec.Command("git", "worktree", "add", worktreePath)
+		cmd.Dir = wm.baseDir
+		output, err = cmd.CombinedOutput()
+	} else {
+		// Repository had no commits, EnsureMainBranch created main with initial commit
+		// Since main is already checked out in base directory, create orphan worktree
+		// The worktree will be on an orphan branch (not 'main') which is expected for empty repos
+		cmd = exec.Command("git", "worktree", "add", "--orphan", worktreePath)
+		cmd.Dir = wm.baseDir
+		output, err = cmd.CombinedOutput()
+	}
+
 	if err != nil {
 		return "", fmt.Errorf("creating worktree: %w\n%s", err, output)
 	}
@@ -189,12 +263,70 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 	mergeMutex.Lock()
 	defer mergeMutex.Unlock()
 
+	// Check if repository was empty before EnsureMainBranch potentially creates a commit
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = wm.baseDir
+	_, err := cmd.Output()
+	hadCommits := err == nil
+
+	// Ensure target branch exists (safety check for empty repos)
+	if err := wm.EnsureMainBranch(); err != nil {
+		return fmt.Errorf("ensuring target branch: %w", err)
+	}
+
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
 	branchName := fmt.Sprintf("drover-%s", taskID)
 
+	// If repo had no commits before EnsureMainBranch, we need special handling
+	// The worktree's commit becomes the initial commit for main
+	if !hadCommits {
+		// Stage all changes
+		cmd = exec.Command("git", "add", "-A")
+		cmd.Dir = worktreePath
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("staging changes: %w\n%s", err, output)
+		}
+
+		// Create initial commit if needed
+		cmd = exec.Command("git", "commit", "-m", fmt.Sprintf("drover: Initial commit from %s", taskID))
+		cmd.Dir = worktreePath
+		if output, err := cmd.CombinedOutput(); err != nil {
+			if !strings.Contains(string(output), "nothing to commit") {
+				return fmt.Errorf("creating initial commit: %w\n%s", err, output)
+			}
+		}
+
+		// Get the commit hash (trim trailing newline)
+		cmd = exec.Command("git", "rev-parse", "HEAD")
+		cmd.Dir = worktreePath
+		commitHashBytes, err := cmd.Output()
+		if err != nil {
+			return fmt.Errorf("getting commit hash: %w", err)
+		}
+		commitHash := strings.TrimSpace(string(commitHashBytes))
+
+		// Update main branch to point to the worktree's commit
+		targetBranch := wm.GetMergeTargetBranch()
+		cmd = exec.Command("git", "checkout", "-B", targetBranch)
+		cmd.Dir = wm.baseDir
+		output, err := cmd.CombinedOutput()
+		if err != nil && !strings.Contains(string(output), "fatal: invalid reference") &&
+			!strings.Contains(string(output), "fatal: you must specify a branch name") {
+			return fmt.Errorf("creating %s branch: %w\n%s", targetBranch, err, output)
+		}
+
+		cmd = exec.Command("git", "reset", "--hard", commitHash)
+		cmd.Dir = wm.baseDir
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("resetting main to commit: %w\n%s", err, output)
+		}
+
+		return nil
+	}
+
+	// Repository has commits, proceed with standard merge
 	// Check if worktree has any commits ahead of main
-	// Run this from the base directory to ensure we have the main branch reference
-	cmd := exec.Command("git", "rev-list", "main.."+branchName, "--count")
+	cmd = exec.Command("git", "rev-list", "main.."+branchName, "--count")
 	cmd.Dir = wm.baseDir
 	output, err := cmd.Output()
 	if err != nil {
@@ -219,17 +351,43 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 		return fmt.Errorf("creating branch: %w\n%s", err, output)
 	}
 
-	// Switch to main in base repo
-	cmd = exec.Command("git", "checkout", "main")
+	// Check if branches are unrelated (common in empty repos where worktree was created before main had commits)
+	// Try the merge and check for "unrelated histories" error
+	targetBranch := wm.GetMergeTargetBranch()
+	cmd = exec.Command("git", "checkout", targetBranch)
 	cmd.Dir = wm.baseDir
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("checking out main: %w\n%s", err, output)
+		return fmt.Errorf("checking out %s: %w\n%s", targetBranch, err, output)
 	}
 
-	// Merge the branch
 	cmd = exec.Command("git", "merge", "--no-ff", branchName, "-m", fmt.Sprintf("drover: Merge %s", taskID))
 	cmd.Dir = wm.baseDir
-	if output, err := cmd.CombinedOutput(); err != nil {
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		outputStr := string(output)
+		// Check for unrelated histories error
+		if strings.Contains(outputStr, "refusing to merge unrelated histories") {
+			// Branches are unrelated - this happens when worktree was created before main had commits
+			// Use reset --hard to adopt the worktree's commit as main's commit
+
+			// Get the worktree's commit hash
+			cmd = exec.Command("git", "rev-parse", "HEAD")
+			cmd.Dir = worktreePath
+			commitHashBytes, err := cmd.Output()
+			if err != nil {
+				return fmt.Errorf("getting worktree commit hash: %w", err)
+			}
+			commitHash := strings.TrimSpace(string(commitHashBytes))
+
+			// Reset main to the worktree's commit
+			cmd = exec.Command("git", "reset", "--hard", commitHash)
+			cmd.Dir = wm.baseDir
+			if output, err := cmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("resetting main to worktree commit: %w\n%s", err, output)
+			}
+
+			return nil
+		}
 		return fmt.Errorf("merging: %w\n%s", err, output)
 	}
 
@@ -281,17 +439,17 @@ func (wm *WorktreeManager) Path(taskID string) string {
 // Directories to clean up aggressively (build artifacts and dependencies)
 // These can consume massive amounts of disk space
 var aggressiveCleanupDirs = []string{
-	"target",           // Rust/Cargo build artifacts
-	"node_modules",     // Node.js dependencies
-	"vendor",           // PHP/Go vendor directories
-	"__pycache__",      // Python cache
-	".venv",            // Python virtual environments
-	"venv",             // Python virtual environments
-	"dist",             // Various build outputs
-	"build",            // Various build outputs
-	".next",            // Next.js cache
-	".nuxt",            // Nuxt.js cache
-	"coverage",         // Code coverage reports
+	"target",       // Rust/Cargo build artifacts
+	"node_modules", // Node.js dependencies
+	"vendor",       // PHP/Go vendor directories
+	"__pycache__",  // Python cache
+	".venv",        // Python virtual environments
+	"venv",         // Python virtual environments
+	"dist",         // Various build outputs
+	"build",        // Various build outputs
+	".next",        // Next.js cache
+	".nuxt",        // Nuxt.js cache
+	"coverage",     // Code coverage reports
 }
 
 // RemoveAggressive removes a worktree and aggressively cleans up build artifacts

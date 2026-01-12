@@ -425,3 +425,273 @@ func TestWorktreeManager_Cleanup(t *testing.T) {
 		}
 	}
 }
+
+// setupEmptyTestRepo creates a temporary empty git repository for testing
+func setupEmptyTestRepo(t *testing.T) (string, *git.WorktreeManager) {
+	t.Helper()
+
+	// Create temp directory
+	tmpDir := t.TempDir()
+
+	// Initialize git repo (empty - no commits)
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to init git repo: %v", err)
+	}
+
+	// Configure git
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to set git email: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to set git name: %v", err)
+	}
+
+	// Create worktree directory
+	worktreeDir := filepath.Join(tmpDir, ".drover", "worktrees")
+
+	worktreeMgr := git.NewWorktreeManager(tmpDir, worktreeDir)
+	worktreeMgr.SetVerbose(true)
+
+	return tmpDir, worktreeMgr
+}
+
+// TestEnsureMainBranch_EmptyRepo verifies EnsureMainBranch creates main branch in empty repo
+func TestEnsureMainBranch_EmptyRepo(t *testing.T) {
+	baseDir, wm := setupEmptyTestRepo(t)
+
+	// Verify main branch doesn't exist initially
+	cmd := exec.Command("git", "rev-parse", "--verify", "main")
+	cmd.Dir = baseDir
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("Main branch should not exist in empty repo")
+	}
+
+	// Ensure main branch
+	err = wm.EnsureMainBranch()
+	if err != nil {
+		t.Fatalf("EnsureMainBranch failed: %v", err)
+	}
+
+	// Verify main branch exists and is current
+	cmd = exec.Command("git", "branch", "--show-current")
+	cmd.Dir = baseDir
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get current branch: %v", err)
+	}
+
+	branch := strings.TrimSpace(string(output))
+	if branch != "main" {
+		t.Errorf("Expected current branch to be 'main', got '%s'", branch)
+	}
+
+	// Verify main has at least one commit (the empty initial commit)
+	cmd = exec.Command("git", "rev-list", "--count", "main")
+	cmd.Dir = baseDir
+	output, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get commit count: %v", err)
+	}
+
+	count := strings.TrimSpace(string(output))
+	if count == "0" {
+		t.Error("Main branch should have at least 1 commit")
+	}
+}
+
+// TestWorktreeManager_Create_EmptyRepo verifies worktree creation in empty repo
+func TestWorktreeManager_Create_EmptyRepo(t *testing.T) {
+	baseDir, wm := setupEmptyTestRepo(t)
+
+	task := &types.Task{
+		ID:    "task-empty-123",
+		Title: "Test Task in Empty Repo",
+	}
+
+	// Create worktree - should handle empty repo automatically
+	worktreePath, err := wm.Create(task)
+	if err != nil {
+		t.Fatalf("Failed to create worktree in empty repo: %v", err)
+	}
+
+	// Verify worktree directory exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Error("Worktree directory was not created")
+	}
+
+	// Verify main branch was created
+	cmd := exec.Command("git", "rev-parse", "--verify", "main")
+	cmd.Dir = baseDir
+	if err := cmd.Run(); err != nil {
+		t.Error("Main branch should exist after worktree creation")
+	}
+
+	// Verify worktree is usable (can run git commands)
+	// For empty repos, worktree will be on an orphan branch which may not have commits yet
+	cmd = exec.Command("git", "status")
+	cmd.Dir = worktreePath
+	if err := cmd.Run(); err != nil {
+		t.Errorf("Worktree should be usable: %v", err)
+	}
+
+	// Cleanup
+	wm.Remove(task.ID)
+}
+
+// TestWorktreeManager_Commit_EmptyRepo verifies committing in empty repo worktree
+func TestWorktreeManager_Commit_EmptyRepo(t *testing.T) {
+	_, wm := setupEmptyTestRepo(t)
+
+	task := &types.Task{
+		ID:    "task-commit-empty",
+		Title: "Test Commit in Empty Repo",
+	}
+
+	// Create worktree
+	worktreePath, err := wm.Create(task)
+	if err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+	defer wm.Remove(task.ID)
+
+	// Make changes and commit
+	testFile := filepath.Join(worktreePath, "new-file.txt")
+	if err := os.WriteFile(testFile, []byte("new content\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	hasChanges, err := wm.Commit(task.ID, "Add new file in empty repo")
+	if err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+	if !hasChanges {
+		t.Error("Expected hasChanges to be true")
+	}
+
+	// Verify commit was created in worktree
+	cmd := exec.Command("git", "log", "--oneline", "-1")
+	cmd.Dir = worktreePath
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get log: %v", err)
+	}
+
+	if !strings.Contains(string(output), "Add new file in empty repo") {
+		t.Errorf("Expected commit message not found: %s", output)
+	}
+}
+
+// TestWorktreeManager_MergeToMain_EmptyRepo verifies merging from empty repo worktree
+func TestWorktreeManager_MergeToMain_EmptyRepo(t *testing.T) {
+	baseDir, wm := setupEmptyTestRepo(t)
+
+	task := &types.Task{
+		ID:    "task-merge-empty",
+		Title: "Test Merge from Empty Repo",
+	}
+
+	// Create worktree
+	worktreePath, err := wm.Create(task)
+	if err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+	defer wm.Remove(task.ID)
+
+	// Make and commit changes
+	testFile := filepath.Join(worktreePath, "merged-file.txt")
+	if err := os.WriteFile(testFile, []byte("merged content\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	_, err = wm.Commit(task.ID, "Add file to merge")
+	if err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+
+	// Merge to main
+	err = wm.MergeToMain(task.ID)
+	if err != nil {
+		t.Fatalf("Failed to merge to main: %v", err)
+	}
+
+	// Verify file exists in main
+	mainFile := filepath.Join(baseDir, "merged-file.txt")
+	if _, err := os.Stat(mainFile); os.IsNotExist(err) {
+		t.Error("File was not merged to main branch")
+	}
+
+	// Verify commit is in main's history
+	cmd := exec.Command("git", "log", "--oneline")
+	cmd.Dir = baseDir
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to get log: %v", err)
+	}
+
+	if !strings.Contains(string(output), "Add file to merge") {
+		t.Errorf("Merge commit not found in main history: %s", output)
+	}
+}
+
+// TestWorktreeManager_MergeToMain_WithoutCreate verifies MergeToMain works even if Create wasn't called
+// This tests the EnsureMainBranch safety check
+func TestWorktreeManager_MergeToMain_WithoutCreate(t *testing.T) {
+	baseDir, wm := setupEmptyTestRepo(t)
+
+	taskID := "task-merge-no-create"
+	worktreePath := wm.Path(taskID)
+
+	// Manually create worktree without using wm.Create()
+	// This simulates a scenario where MergeToMain is called independently
+	cmd := exec.Command("git", "worktree", "add", "--orphan", worktreePath)
+	cmd.Dir = baseDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to create worktree: %v", err)
+	}
+	defer wm.Remove(taskID)
+
+	// Make and commit changes in the worktree
+	testFile := filepath.Join(worktreePath, "manual-file.txt")
+	if err := os.WriteFile(testFile, []byte("manual content\n"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", "manual-file.txt")
+	cmd.Dir = worktreePath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to stage changes: %v", err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Manual commit")
+	cmd.Dir = worktreePath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to commit: %v", err)
+	}
+
+	// Merge to main - should create main branch automatically
+	err := wm.MergeToMain(taskID)
+	if err != nil {
+		t.Fatalf("MergeToMain failed without Create being called: %v", err)
+	}
+
+	// Verify main branch exists and has the file
+	mainFile := filepath.Join(baseDir, "manual-file.txt")
+	if _, err := os.Stat(mainFile); os.IsNotExist(err) {
+		t.Error("File was not merged to main branch")
+	}
+
+	// Verify main branch was created
+	cmd = exec.Command("git", "rev-parse", "--verify", "main")
+	cmd.Dir = baseDir
+	if err := cmd.Run(); err != nil {
+		t.Error("Main branch was not created by MergeToMain")
+	}
+}
