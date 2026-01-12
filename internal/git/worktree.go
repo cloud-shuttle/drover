@@ -42,18 +42,26 @@ func (wm *WorktreeManager) SetVerbose(v bool) {
 // Create creates a new worktree for a task
 func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 	worktreePath := filepath.Join(wm.worktreeDir, task.ID)
+	branchName := fmt.Sprintf("drover-%s", task.ID)
 
 	// Ensure worktree directory exists
 	if err := os.MkdirAll(wm.worktreeDir, 0755); err != nil {
 		return "", fmt.Errorf("creating worktree directory: %w", err)
 	}
 
-	// Clean up any existing worktree at this path first
+	// Clean up any existing worktree/branch at this path first
 	// This handles stale worktrees from interrupted runs
 	wm.cleanUpWorktree(task.ID)
 
-	// Create the worktree
-	cmd := exec.Command("git", "worktree", "add", worktreePath)
+	// Delete the branch if it already exists from a previous failed run
+	cmd := exec.Command("git", "branch", "-D", branchName)
+	cmd.Dir = wm.baseDir
+	_, _ = cmd.CombinedOutput() // Ignore errors - branch may not exist
+
+	// Create the worktree with a new branch
+	// Using -b ensures the worktree has its own branch from the start
+	// This avoids detached HEAD issues and makes merging more reliable
+	cmd = exec.Command("git", "worktree", "add", "-b", branchName, worktreePath)
 	cmd.Dir = wm.baseDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -63,32 +71,44 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 	return worktreePath, nil
 }
 
-// cleanUpWorktree removes any existing worktree registration and directory for a task
+// cleanUpWorktree removes any existing worktree registration, branch, and directory for a task
 func (wm *WorktreeManager) cleanUpWorktree(taskID string) {
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
+	branchName := fmt.Sprintf("drover-%s", taskID)
 
 	// Step 1: Try to remove the worktree via git (handles registered worktrees)
 	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
 	cmd.Dir = wm.baseDir
 	_ = cmd.Run() // Ignore errors
 
-	// Step 2: If directory still exists, remove it manually (handles unregistered directories)
+	// Step 2: Remove the branch if it exists (from previous runs)
+	cmd = exec.Command("git", "branch", "-D", branchName)
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run() // Ignore errors
+
+	// Step 3: If directory still exists, remove it manually (handles unregistered directories)
 	if _, err := os.Stat(worktreePath); err == nil {
 		_ = os.RemoveAll(worktreePath)
 	}
 
-	// Step 3: Prune all stale worktree registrations globally
+	// Step 4: Prune all stale worktree registrations globally
 	cmd = exec.Command("git", "worktree", "prune")
 	cmd.Dir = wm.baseDir
 	_ = cmd.Run() // Ignore errors
 }
 
-// PruneStale removes stale git worktree registrations for a specific task
+// PruneStale removes stale git worktree registrations and branch for a specific task
 func (wm *WorktreeManager) PruneStale(taskID string) {
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
+	branchName := fmt.Sprintf("drover-%s", taskID)
 
 	// First, try force remove if the worktree is registered but directory is missing
 	cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+	cmd.Dir = wm.baseDir
+	_ = cmd.Run() // Ignore errors
+
+	// Also remove the branch if it exists (from previous runs)
+	cmd = exec.Command("git", "branch", "-D", branchName)
 	cmd.Dir = wm.baseDir
 	_ = cmd.Run() // Ignore errors
 
@@ -98,9 +118,10 @@ func (wm *WorktreeManager) PruneStale(taskID string) {
 	_ = cmd.Run() // Ignore errors, this is best-effort cleanup
 }
 
-// Remove removes a worktree
+// Remove removes a worktree and its associated branch
 func (wm *WorktreeManager) Remove(taskID string) error {
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)
+	branchName := fmt.Sprintf("drover-%s", taskID)
 
 	// Remove the worktree
 	cmd := exec.Command("git", "worktree", "remove", worktreePath)
@@ -112,10 +133,16 @@ func (wm *WorktreeManager) Remove(taskID string) error {
 		if strings.Contains(outputStr, "Not a worktree") ||
 			strings.Contains(outputStr, "no such file or directory") ||
 			strings.Contains(outputStr, "is not a working tree") {
-			return nil
+			// Continue to clean up the branch even if worktree is gone
+		} else {
+			return fmt.Errorf("removing worktree: %w\n%s", err, output)
 		}
-		return fmt.Errorf("removing worktree: %w\n%s", err, output)
 	}
+
+	// Clean up the associated branch
+	cmd = exec.Command("git", "branch", "-D", branchName)
+	cmd.Dir = wm.baseDir
+	_, _ = cmd.CombinedOutput() // Ignore errors - branch may not exist
 
 	return nil
 }
@@ -189,34 +216,28 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 	mergeMutex.Lock()
 	defer mergeMutex.Unlock()
 
-	worktreePath := filepath.Join(wm.worktreeDir, taskID)
 	branchName := fmt.Sprintf("drover-%s", taskID)
 
-	// Check if worktree has any commits ahead of main
-	// Run this from the base directory to ensure we have the main branch reference
-	cmd := exec.Command("git", "rev-list", "main.."+branchName, "--count")
+	// Check if the branch exists (worktree was created successfully)
+	cmd := exec.Command("git", "rev-parse", "--verify", branchName)
 	cmd.Dir = wm.baseDir
-	output, err := cmd.Output()
-	if err != nil {
-		// Branch doesn't exist yet, we'll create it and check if there's anything to merge
-		output = []byte("1") // Assume there's something to merge
-	}
-
-	// If the count is 0, no commits to merge
-	if strings.TrimSpace(string(output)) == "0" {
+	if _, err := cmd.CombinedOutput(); err != nil {
+		// Branch doesn't exist, nothing to merge
+		// This can happen if the worktree was never created or was cleaned up
 		return nil
 	}
 
-	// Delete the branch if it already exists from a previous failed run
-	cmd = exec.Command("git", "branch", "-D", branchName)
+	// Check if worktree has any commits ahead of main
+	cmd = exec.Command("git", "rev-list", "main.."+branchName, "--count")
 	cmd.Dir = wm.baseDir
-	_, _ = cmd.CombinedOutput() // Ignore errors - branch may not exist
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("checking commits ahead: %w", err)
+	}
 
-	// Create a branch from the worktree
-	cmd = exec.Command("git", "checkout", "-b", branchName)
-	cmd.Dir = worktreePath
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("creating branch: %w\n%s", err, output)
+	// If the count is 0, no commits to merge (worktree was clean)
+	if strings.TrimSpace(string(output)) == "0" {
+		return nil
 	}
 
 	// Switch to main in base repo
@@ -233,7 +254,7 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 		return fmt.Errorf("merging: %w\n%s", err, output)
 	}
 
-	// Delete the branch
+	// Delete the branch after successful merge
 	cmd = exec.Command("git", "branch", "-d", branchName)
 	cmd.Dir = wm.baseDir
 	_, _ = cmd.CombinedOutput() // Ignore errors on branch delete
