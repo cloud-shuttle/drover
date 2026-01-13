@@ -31,8 +31,11 @@ You have a project with dozens of tasks. Running them one at a time is slow. Run
 ## Quick Start
 
 ```bash
-# Install
-go install github.com/cloud-shuttle/drover@latest
+# Install (note: use the full package path including /cmd/drover)
+go install github.com/cloud-shuttle/drover/cmd/drover@latest
+
+# Add Go's bin directory to your PATH if not already configured
+export PATH=$PATH:$HOME/go/bin
 
 # Initialize in your project
 cd my-project
@@ -72,7 +75,7 @@ go build -o drover .
 ### With Go Install
 
 ```bash
-go install github.com/cloud-shuttle/drover@latest
+go install github.com/cloud-shuttle/drover/cmd/drover@latest
 ```
 
 ## Commands
