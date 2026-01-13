@@ -51,3 +51,4 @@ Thumbs.db
 *.log
 debug.txt
 work-task-*.txt
+.release/
