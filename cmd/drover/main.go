@@ -59,10 +59,18 @@ handles failures gracefully, and guarantees progress through crashes and restart
 		resumeCmd(),
 		resetCmd(),
 		exportCmd(),
+		importCmd(),
+		shareCmd(),
+		importShareCmd(),
+		operatorCmd(),
 		installCmd(),
 		dbosDemoCmd(),
 		worktreeCmd(),
 		dashboardCmd(),
+		pauseCmd(),
+		resumeCmdForTask(),
+		hintCmd(),
+		editCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {

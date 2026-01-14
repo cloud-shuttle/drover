@@ -2,6 +2,10 @@ package dashboard
 
 import (
 	"database/sql"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -11,6 +15,7 @@ type Stats struct {
 	Ready      int `json:"ready"`
 	Claimed    int `json:"claimed"`
 	InProgress int `json:"in_progress"`
+	Paused     int `json:"paused"`
 	Blocked    int `json:"blocked"`
 	Completed  int `json:"completed"`
 	Failed     int `json:"failed"`
@@ -45,6 +50,7 @@ type TaskWithEpic struct {
 	LastError      string  `json:"last_error"`
 	ClaimedBy      string  `json:"claimed_by"`
 	ClaimedAt      int64   `json:"claimed_at"`
+	Operator       string  `json:"operator"`
 	CreatedAt      int64   `json:"created_at"`
 	UpdatedAt      int64   `json:"updated_at"`
 }
@@ -102,6 +108,8 @@ func (s *Server) getStatus() (*Stats, error) {
 			stats.Claimed = count
 		case "in_progress":
 			stats.InProgress = count
+		case "paused":
+			stats.Paused = count
 		case "blocked":
 			stats.Blocked = count
 		case "completed":
@@ -112,7 +120,7 @@ func (s *Server) getStatus() (*Stats, error) {
 	}
 
 	stats.Total = stats.Ready + stats.Claimed + stats.InProgress +
-		stats.Blocked + stats.Completed + stats.Failed
+		stats.Paused + stats.Blocked + stats.Completed + stats.Failed
 
 	// Calculate progress percentage
 	if stats.Total > 0 {
@@ -172,6 +180,7 @@ func (s *Server) getTasks(epic, status string) ([]TaskWithEpic, error) {
 			t.priority, t.status, t.attempts, t.max_attempts,
 			COALESCE(t.last_error, ''),
 			COALESCE(t.claimed_by, ''), COALESCE(t.claimed_at, 0),
+			COALESCE(t.operator, ''),
 			t.created_at, t.updated_at
 		FROM tasks t
 		LEFT JOIN epics e ON t.epic_id = e.id
@@ -215,6 +224,7 @@ func (s *Server) getTasks(epic, status string) ([]TaskWithEpic, error) {
 			&t.Priority, &t.Status, &t.Attempts, &t.MaxAttempts,
 			&t.LastError,
 			&t.ClaimedBy, &t.ClaimedAt,
+			&t.Operator,
 			&t.CreatedAt, &t.UpdatedAt,
 		); err != nil {
 			continue
@@ -235,6 +245,7 @@ func (s *Server) getTask(id string) (*TaskWithEpic, error) {
 			t.priority, t.status, t.attempts, t.max_attempts,
 			COALESCE(t.last_error, ''),
 			COALESCE(t.claimed_by, ''), COALESCE(t.claimed_at, 0),
+			COALESCE(t.operator, ''),
 			t.created_at, t.updated_at
 		FROM tasks t
 		LEFT JOIN epics e ON t.epic_id = e.id
@@ -249,6 +260,7 @@ func (s *Server) getTask(id string) (*TaskWithEpic, error) {
 		&t.Priority, &t.Status, &t.Attempts, &t.MaxAttempts,
 		&t.LastError,
 		&t.ClaimedBy, &t.ClaimedAt,
+		&t.Operator,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 
@@ -345,4 +357,91 @@ func (s *Server) getGraph() (*Graph, error) {
 	}
 
 	return graph, nil
+}
+
+// WorktreeFile represents a file in a worktree
+type WorktreeFile struct {
+	Name     string `json:"name"`
+	Path     string `json:"path"`
+	Type     string `json:"type"` // "file" or "dir"
+	Size     int64  `json:"size"`
+	Modified int64  `json:"modified,omitempty"`
+}
+
+// getWorktreeFiles lists files in a task's worktree
+func (s *Server) getWorktreeFiles(taskID, path string) ([]WorktreeFile, error) {
+	// Get task info to verify it exists and get worktree details
+	var worktreePath string
+	var taskStatus string
+	err := s.db.QueryRow(`
+		SELECT w.path, t.status
+		FROM worktrees w
+		LEFT JOIN tasks t ON w.task_id = t.id
+		WHERE w.task_id = ?
+	`, taskID).Scan(&worktreePath, &taskStatus)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build full path to requested directory
+	fullPath := filepath.Join(worktreePath, path)
+
+	// Read directory
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []WorktreeFile
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		fileType := "file"
+		if entry.IsDir() {
+			fileType = "dir"
+		}
+
+		files = append(files, WorktreeFile{
+			Name: entry.Name(),
+			Path: filepath.Join(path, entry.Name()),
+			Type: fileType,
+			Size: info.Size(),
+			Modified: info.ModTime().Unix(),
+		})
+	}
+
+	return files, nil
+}
+
+// getWorktreeFileContents reads a file's contents from a worktree
+func (s *Server) getWorktreeFileContents(taskID, filePath string) (string, error) {
+	// Get worktree path
+	var worktreePath string
+	err := s.db.QueryRow(`
+		SELECT path FROM worktrees WHERE task_id = ?
+	`, taskID).Scan(&worktreePath)
+	if err != nil {
+		return "", err
+	}
+
+	// Security check: prevent directory traversal
+	cleanPath := filepath.Join(worktreePath, filePath)
+	if !strings.HasPrefix(cleanPath, worktreePath) {
+		return "", fmt.Errorf("invalid file path")
+	}
+
+	// Read file (limit to 1MB for security)
+	content, err := os.ReadFile(cleanPath)
+	if err != nil {
+		return "", err
+	}
+
+	if len(content) > 1024*1024 {
+		return "", fmt.Errorf("file too large")
+	}
+
+	return string(content), nil
 }

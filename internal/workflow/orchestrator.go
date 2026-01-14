@@ -259,6 +259,7 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 
 	// Create worktree (use pool if enabled)
 	var worktreePath string
+	var worktreeCleanupNeeded = true
 	if o.pool != nil && o.pool.IsEnabled() {
 		worktreePath, err = o.pool.Acquire(task.ID)
 		if err != nil {
@@ -270,19 +271,58 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 			}
 			return
 		}
-		defer o.pool.Release(task.ID, false) // Don't retain worktree after task completion
-	} else {
-		worktreePath, err = o.git.Create(task)
-		if err != nil {
-			log.Printf("❌ Task %s failed: creating worktree: %v", task.ID, err)
-			telemetry.RecordError(taskSpan, err, "WorktreeCreationFailed", "git")
-			telemetry.SetTaskStatus(taskSpan, "failed")
-			if o.handleTaskFailure(task.ID, err.Error()) {
-				taskCompleted = true // Task set to ready for retry
+		defer func() {
+			if worktreeCleanupNeeded {
+				o.pool.Release(task.ID, false) // Don't retain worktree after task completion
 			}
-			return
+		}()
+	} else {
+		// Check if worktree already exists (from a paused task)
+		existingPath, err := o.git.GetWorktreePath(task.ID)
+		if err == nil && existingPath != "" {
+			worktreePath = existingPath
+			log.Printf("♻️  Reusing existing worktree for task %s at %s", task.ID, worktreePath)
+		} else {
+			worktreePath, err = o.git.Create(task)
+			if err != nil {
+				log.Printf("❌ Task %s failed: creating worktree: %v", task.ID, err)
+				telemetry.RecordError(taskSpan, err, "WorktreeCreationFailed", "git")
+				telemetry.SetTaskStatus(taskSpan, "failed")
+				if o.handleTaskFailure(task.ID, err.Error()) {
+					taskCompleted = true // Task set to ready for retry
+				}
+				return
+			}
 		}
-		defer o.git.Remove(task.ID)
+		defer func() {
+			if worktreeCleanupNeeded {
+				o.git.Remove(task.ID)
+			}
+		}()
+	}
+
+	// Fetch pending guidance and set on task execution context
+	guidance, err := o.store.GetPendingGuidance(task.ID)
+	if err != nil {
+		log.Printf("Error fetching guidance: %v", err)
+		// Continue without guidance rather than failing
+	}
+	if len(guidance) > 0 {
+		log.Printf("💡 Found %d pending guidance messages for task %s", len(guidance), task.ID)
+		task.ExecutionContext = &types.TaskExecutionContext{
+			Guidance: guidance,
+		}
+		// Track guidance IDs for marking as delivered later
+		var guidanceIDs []string
+		for _, g := range guidance {
+			guidanceIDs = append(guidanceIDs, g.ID)
+		}
+		defer func() {
+			// Mark guidance as delivered after execution completes
+			if err := o.store.MarkGuidanceDelivered(guidanceIDs); err != nil {
+				log.Printf("Error marking guidance delivered: %v", err)
+			}
+		}()
 	}
 
 	// Execute Claude Code and capture the result
@@ -402,6 +442,30 @@ func (o *Orchestrator) executeSubTasks(workerID int, parentTask *types.Task) boo
 			}
 		}
 
+		// Fetch pending guidance for sub-task
+		guidance, gErr := o.store.GetPendingGuidance(subTask.ID)
+		if gErr != nil {
+			log.Printf("Error fetching guidance: %v", gErr)
+			// Continue without guidance rather than failing
+		}
+		if len(guidance) > 0 {
+			log.Printf("💡 Found %d pending guidance messages for sub-task %s", len(guidance), subTask.ID)
+			subTask.ExecutionContext = &types.TaskExecutionContext{
+				Guidance: guidance,
+			}
+			// Track guidance IDs for marking as delivered later
+			var guidanceIDs []string
+			for _, g := range guidance {
+				guidanceIDs = append(guidanceIDs, g.ID)
+			}
+			defer func() {
+				// Mark guidance as delivered after execution completes
+				if err := o.store.MarkGuidanceDelivered(guidanceIDs); err != nil {
+					log.Printf("Error marking guidance delivered: %v", err)
+				}
+			}()
+		}
+
 		// Execute sub-task
 		start := time.Now()
 		taskCtx, taskSpan := telemetry.StartTaskSpan(context.Background(),
@@ -502,9 +566,9 @@ func (o *Orchestrator) printProgress(status *db.ProjectStatus) {
 	}
 
 	progress := float64(status.Completed) / float64(status.Total) * 100
-	log.Printf("📊 Progress: %d/%d tasks (%.1f%%) | Ready: %d | In Progress: %d | Blocked: %d | Failed: %d",
+	log.Printf("📊 Progress: %d/%d tasks (%.1f%%) | Ready: %d | In Progress: %d | Paused: %d | Blocked: %d | Failed: %d",
 		status.Completed, status.Total, progress,
-		status.Ready, status.InProgress, status.Blocked, status.Failed)
+		status.Ready, status.InProgress, status.Paused, status.Blocked, status.Failed)
 }
 
 // printFinalStatus prints final run results

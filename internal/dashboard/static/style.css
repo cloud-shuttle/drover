@@ -287,6 +287,7 @@ body {
 .task-card.status-ready { border-left-color: var(--ready); }
 .task-card.status-claimed { border-left-color: var(--active); }
 .task-card.status-in_progress { border-left-color: var(--active); }
+.task-card.status-paused { border-left-color: var(--warning); }
 .task-card.status-blocked { border-left-color: var(--blocked); }
 .task-card.status-completed { border-left-color: var(--done); }
 .task-card.status-failed { border-left-color: var(--error); }
@@ -321,10 +322,76 @@ body {
   margin-top: 8px;
 }
 
+.task-operator {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
 .task-error {
   font-size: 0.85rem;
   color: var(--error);
   margin-top: 8px;
+}
+
+/* Task Actions */
+.task-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.btn-pause,
+.btn-resume,
+.btn-guidance {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-pause:hover,
+.btn-resume:hover,
+.btn-guidance:hover {
+  background: var(--border);
+}
+
+.btn-pause {
+  color: var(--warning);
+}
+
+.btn-resume {
+  color: var(--success);
+}
+
+.btn-guidance {
+  color: var(--accent);
+}
+
+/* Task Guidance */
+.task-guidance {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.guidance-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.guidance-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 /* Workers */
@@ -416,6 +483,7 @@ body {
 .badge.ready { background: var(--ready); color: white; }
 .badge.claimed { background: var(--active); color: white; }
 .badge.in_progress { background: var(--active); color: white; }
+.badge.paused { background: var(--warning); color: white; }
 .badge.blocked { background: var(--blocked); color: white; }
 .badge.completed { background: var(--done); color: white; }
 .badge.failed { background: var(--error); color: white; }
@@ -444,4 +512,205 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+
+/* Modal */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+}
+
+.modal.open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-content {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 800px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* Worktree Browser */
+.worktree-breadcrumb {
+  display: flex;
+  gap: 5px;
+  margin-bottom: 15px;
+  flex-wrap: wrap;
+}
+
+.breadcrumb-item {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.breadcrumb-item:hover {
+  text-decoration: underline;
+}
+
+.breadcrumb-item:not(:last-child)::after {
+  content: '/';
+  color: var(--text-muted);
+  margin-left: 5px;
+}
+
+.breadcrumb-item:last-child {
+  color: var(--text);
+  cursor: default;
+}
+
+.breadcrumb-item:last-child:hover {
+  text-decoration: none;
+}
+
+.worktree-files {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.worktree-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.worktree-file:hover {
+  background: var(--bg-hover);
+}
+
+.file-icon {
+  font-size: 1.1rem;
+}
+
+.file-name {
+  flex: 1;
+}
+
+.file-size {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+.file-modal {
+  position: fixed;
+  z-index: 1100;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+.file-modal.open {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-modal-content {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 900px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.file-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-modal-body {
+  padding: 0;
+  overflow: auto;
+  flex: 1;
+}
+
+.file-contents {
+  margin: 0;
+  padding: 20px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* File View Button */
+.btn-files {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-files:hover {
+  background: var(--border);
 }

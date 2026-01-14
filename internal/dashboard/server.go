@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/gorilla/websocket"
 )
 
@@ -21,6 +22,7 @@ var staticFS embed.FS
 // Server is the dashboard HTTP server
 type Server struct {
 	db     *sql.DB
+	store  *db.Store
 	hub    *Hub
 	addr   string
 	server *http.Server
@@ -31,6 +33,7 @@ type Config struct {
 	Addr        string
 	DatabaseURL string
 	DB          *sql.DB // Pass existing connection
+	Store       *db.Store
 }
 
 // New creates a new dashboard server
@@ -45,9 +48,10 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	s := &Server{
-		db:   db,
-		hub:  newHub(),
-		addr: cfg.Addr,
+		db:    db,
+		store: cfg.Store,
+		hub:   newHub(),
+		addr:  cfg.Addr,
 	}
 	return s, nil
 }
@@ -61,8 +65,10 @@ func (s *Server) Start() error {
 	mux.HandleFunc("GET /api/epics", s.handleEpics)
 	mux.HandleFunc("GET /api/tasks", s.handleTasks)
 	mux.HandleFunc("GET /api/tasks/", s.handleTask)
+	mux.HandleFunc("POST /api/tasks/", s.handleTaskAction)
 	mux.HandleFunc("GET /api/workers", s.handleWorkers)
 	mux.HandleFunc("GET /api/graph", s.handleGraph)
+	mux.HandleFunc("GET /api/worktrees/", s.handleWorktreeAPI)
 	mux.HandleFunc("GET /ws", s.handleWebSocket)
 
 	// Static files

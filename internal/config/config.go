@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -150,4 +151,75 @@ func parseDurationOrDefault(s string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// GetOperator returns the current operator name from environment or config file
+func GetOperator() string {
+	if v := os.Getenv("DROVER_OPERATOR"); v != "" {
+		return v
+	}
+
+	// Try to read from config file
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	configFile := filepath.Join(homeDir, ".drover", "config.json")
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return ""
+	}
+
+	// Simple JSON parsing for just the operator field
+	type ConfigFile struct {
+		Operator string `json:"operator"`
+	}
+	var cfg ConfigFile
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+
+	return cfg.Operator
+}
+
+// SetOperator saves the operator name to the config file
+func SetOperator(name string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("getting home directory: %w", err)
+	}
+
+	configDir := filepath.Join(homeDir, ".drover")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	configFile := filepath.Join(configDir, "config.json")
+
+	// Read existing config or create new
+	type ConfigFile struct {
+		Operator string `json:"operator"`
+	}
+	var cfg ConfigFile
+
+	data, err := os.ReadFile(configFile)
+	if err == nil {
+		json.Unmarshal(data, &cfg)
+	}
+
+	// Update operator
+	cfg.Operator = name
+
+	// Write back
+	data, err = json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+
+	if err := os.WriteFile(configFile, data, 0644); err != nil {
+		return fmt.Errorf("writing config file: %w", err)
+	}
+
+	return nil
 }
