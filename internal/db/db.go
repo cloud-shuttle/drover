@@ -79,6 +79,7 @@ func (s *Store) InitSchema() error {
 		epic_id TEXT,
 		parent_id TEXT,
 		sequence_number INTEGER DEFAULT 0,
+		type TEXT DEFAULT 'other',
 		priority INTEGER DEFAULT 0,
 		status TEXT DEFAULT 'ready',
 		attempts INTEGER DEFAULT 0,
@@ -86,6 +87,7 @@ func (s *Store) InitSchema() error {
 		last_error TEXT,
 		claimed_by TEXT,
 		claimed_at INTEGER,
+		operator TEXT DEFAULT '',
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL,
 		FOREIGN KEY (epic_id) REFERENCES epics(id),
@@ -190,6 +192,51 @@ func (s *Store) MigrateSchema() error {
 		}
 	}
 
+	// Check if operator column exists (added for multiplayer collaboration)
+	var operatorExists bool
+	err = s.DB.QueryRow(`
+		SELECT COUNT(*) > 0 FROM pragma_table_info('tasks') WHERE name = 'operator'
+	`).Scan(&operatorExists)
+	if err != nil {
+		return fmt.Errorf("checking for operator column: %w", err)
+	}
+
+	if !operatorExists {
+		// Add operator column for tracking who created/owns a task
+		_, err := s.DB.Exec(`
+			ALTER TABLE tasks ADD COLUMN operator TEXT DEFAULT '';
+		`)
+		if err != nil {
+			return fmt.Errorf("adding operator column: %w", err)
+		}
+	}
+
+	// Check if type column exists (added for task categorization)
+	var typeExists bool
+	err = s.DB.QueryRow(`
+		SELECT COUNT(*) > 0 FROM pragma_table_info('tasks') WHERE name = 'type'
+	`).Scan(&typeExists)
+	if err != nil {
+		return fmt.Errorf("checking for type column: %w", err)
+	}
+
+	if !typeExists {
+		// Add type column for categorizing tasks by type
+		_, err := s.DB.Exec(`
+			ALTER TABLE tasks ADD COLUMN type TEXT DEFAULT 'other';
+		`)
+		if err != nil {
+			return fmt.Errorf("adding type column: %w", err)
+		}
+		// Create index for type-based queries
+		_, err = s.DB.Exec(`
+			CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type);
+		`)
+		if err != nil {
+			return fmt.Errorf("creating type index: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -220,6 +267,11 @@ func (s *Store) CreateEpic(title, description string) (*types.Epic, error) {
 
 // CreateTask creates a new task with optional dependencies
 func (s *Store) CreateTask(title, description, epicID string, priority int, blockedBy []string) (*types.Task, error) {
+	return s.CreateTaskWithOperator(title, description, epicID, priority, blockedBy, "")
+}
+
+// CreateTaskWithOperator creates a new task with an operator (user/creator)
+func (s *Store) CreateTaskWithOperator(title, description, epicID string, priority int, blockedBy []string, operator string) (*types.Task, error) {
 	id := generateID("task")
 	now := time.Now().Unix()
 
@@ -231,6 +283,7 @@ func (s *Store) CreateTask(title, description, epicID string, priority int, bloc
 		Priority:    priority,
 		Status:      types.TaskStatusReady,
 		MaxAttempts: 3,
+		Operator:    operator,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -252,9 +305,9 @@ func (s *Store) CreateTask(title, description, epicID string, priority int, bloc
 		epicIDValue = nil
 	}
 	_, err = tx.Exec(`
-		INSERT INTO tasks (id, title, description, epic_id, priority, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.Title, task.Description, epicIDValue, task.Priority, task.Status, task.CreatedAt, task.UpdatedAt)
+		INSERT INTO tasks (id, title, description, epic_id, type, priority, status, operator, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, task.ID, task.Title, task.Description, epicIDValue, task.Type, task.Priority, task.Status, task.Operator, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating task: %w", err)
 	}
@@ -303,6 +356,7 @@ func (s *Store) CreateSubTask(title, description, parentID string, priority int,
 	id := fmt.Sprintf("%s.%d", parentID, nextSeq)
 	now := time.Now().Unix()
 
+	// Inherit operator from parent task
 	task := &types.Task{
 		ID:             id,
 		Title:          title,
@@ -313,6 +367,7 @@ func (s *Store) CreateSubTask(title, description, parentID string, priority int,
 		Priority:       priority,
 		Status:         types.TaskStatusReady,
 		MaxAttempts:    3,
+		Operator:       parent.Operator, // Inherit from parent
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -337,10 +392,10 @@ func (s *Store) CreateSubTask(title, description, parentID string, priority int,
 	// Insert task
 	_, err = tx.Exec(`
 		INSERT INTO tasks (id, title, description, epic_id, parent_id, sequence_number,
-		                  priority, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                  type, priority, status, operator, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Title, task.Description, epicIDValue, task.ParentID, task.SequenceNumber,
-		task.Priority, task.Status, task.CreatedAt, task.UpdatedAt)
+		task.Type, task.Priority, task.Status, task.Operator, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating sub-task: %w", err)
 	}
@@ -391,6 +446,7 @@ func (s *Store) CreateSubTaskWithSequence(title, description, parentID string, s
 	id := fmt.Sprintf("%s.%d", parentID, sequence)
 	now := time.Now().Unix()
 
+	// Inherit operator from parent task
 	task := &types.Task{
 		ID:             id,
 		Title:          title,
@@ -401,6 +457,7 @@ func (s *Store) CreateSubTaskWithSequence(title, description, parentID string, s
 		Priority:       priority,
 		Status:         types.TaskStatusReady,
 		MaxAttempts:    3,
+		Operator:       parent.Operator, // Inherit from parent
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -425,10 +482,10 @@ func (s *Store) CreateSubTaskWithSequence(title, description, parentID string, s
 	// Insert task
 	_, err = tx.Exec(`
 		INSERT INTO tasks (id, title, description, epic_id, parent_id, sequence_number,
-		                  priority, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                  type, priority, status, operator, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Title, task.Description, epicIDValue, task.ParentID, task.SequenceNumber,
-		task.Priority, task.Status, task.CreatedAt, task.UpdatedAt)
+		task.Type, task.Priority, task.Status, task.Operator, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating sub-task: %w", err)
 	}
@@ -532,11 +589,14 @@ func (s *Store) ClaimTaskForEpic(workerID, epicID string) (*types.Task, error) {
 			)
 			RETURNING id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 			          COALESCE(parent_id, ''), sequence_number,
-			          priority, status, attempts, max_attempts, created_at, updated_at
+			          COALESCE(type, 'other'),
+			          priority, status, attempts, max_attempts,
+			          COALESCE(operator, ''), created_at, updated_at
 		`, workerID, now, now, epicID).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
 			&task.ParentID, &task.SequenceNumber,
+			&task.Type,
 			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-			&task.CreatedAt, &task.UpdatedAt)
+			&task.Operator, &task.CreatedAt, &task.UpdatedAt)
 	} else {
 		// No epic filtering, exclude sub-tasks (they run via parent)
 		err = tx.QueryRow(`
@@ -553,11 +613,12 @@ func (s *Store) ClaimTaskForEpic(workerID, epicID string) (*types.Task, error) {
 			)
 			RETURNING id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 			          COALESCE(parent_id, ''), sequence_number,
-			          priority, status, attempts, max_attempts, created_at, updated_at
+			          priority, status, attempts, max_attempts,
+			          COALESCE(operator, ''), created_at, updated_at
 		`, workerID, now, now).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
 			&task.ParentID, &task.SequenceNumber,
 			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-			&task.CreatedAt, &task.UpdatedAt)
+			&task.Operator, &task.CreatedAt, &task.UpdatedAt)
 	}
 
 	if err == sql.ErrNoRows {
@@ -622,20 +683,23 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 	var claimedAt sql.NullInt64
 	var epicID sql.NullString
 	var description sql.NullString
+	var operator sql.NullString
 
 	err := s.DB.QueryRow(`
 		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 		       COALESCE(parent_id, ''), sequence_number,
+		       COALESCE(type, 'other'),
 		       priority, status, attempts, max_attempts,
 		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-		       created_at, updated_at
+		       COALESCE(operator, ''), created_at, updated_at
 		FROM tasks
 		WHERE id = ?
 	`, taskID).Scan(
 		&task.ID, &task.Title, &description, &epicID,
 		&task.ParentID, &task.SequenceNumber,
+		&task.Type,
 		&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-		&claimedBy, &claimedAt,
+		&claimedBy, &claimedAt, &operator,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 
@@ -645,6 +709,7 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 
 	task.Description = description.String
 	task.EpicID = epicID.String
+	task.Operator = operator.String
 	if claimedBy.Valid {
 		task.ClaimedBy = claimedBy.String
 	}
@@ -820,9 +885,10 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 		rows, err = s.DB.Query(`
 			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 			       COALESCE(parent_id, ''), sequence_number,
+			       COALESCE(type, 'other'),
 			       priority, status, attempts, max_attempts,
 			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-			       created_at, updated_at
+			       COALESCE(operator, ''), created_at, updated_at
 			FROM tasks
 			WHERE epic_id = ?
 			ORDER BY created_at ASC
@@ -832,9 +898,10 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 		rows, err = s.DB.Query(`
 			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 			       COALESCE(parent_id, ''), sequence_number,
+			       COALESCE(type, 'other'),
 			       priority, status, attempts, max_attempts,
 			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-			       created_at, updated_at
+			       COALESCE(operator, ''), created_at, updated_at
 			FROM tasks
 			ORDER BY created_at ASC
 		`)
@@ -853,12 +920,14 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 		var epicID sql.NullString
 		var description sql.NullString
 		var parentID sql.NullString
+		var operator sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.Title, &description, &epicID,
 			&parentID, &task.SequenceNumber,
+			&task.Type,
 			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-			&claimedBy, &claimedAt,
+			&claimedBy, &claimedAt, &operator,
 			&task.CreatedAt, &task.UpdatedAt,
 		)
 		if err != nil {
@@ -868,6 +937,7 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 		task.Description = description.String
 		task.EpicID = epicID.String
 		task.ParentID = parentID.String
+		task.Operator = operator.String
 		if claimedBy.Valid {
 			task.ClaimedBy = claimedBy.String
 		}
@@ -1255,9 +1325,10 @@ func (s *Store) GetSubTasks(parentID string) ([]*types.Task, error) {
 	rows, err := s.DB.Query(`
 		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 		       COALESCE(parent_id, ''), sequence_number,
+		       COALESCE(type, 'other'),
 		       priority, status, attempts, max_attempts,
 		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-		       created_at, updated_at
+		       COALESCE(operator, ''), created_at, updated_at
 		FROM tasks
 		WHERE parent_id = ?
 		ORDER BY sequence_number ASC
@@ -1275,12 +1346,14 @@ func (s *Store) GetSubTasks(parentID string) ([]*types.Task, error) {
 		var epicID sql.NullString
 		var description sql.NullString
 		var parentID sql.NullString
+		var operator sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.Title, &description, &epicID,
 			&parentID, &task.SequenceNumber,
+			&task.Type,
 			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-			&claimedBy, &claimedAt,
+			&claimedBy, &claimedAt, &operator,
 			&task.CreatedAt, &task.UpdatedAt,
 		)
 		if err != nil {
@@ -1290,6 +1363,7 @@ func (s *Store) GetSubTasks(parentID string) ([]*types.Task, error) {
 		task.Description = description.String
 		task.EpicID = epicID.String
 		task.ParentID = parentID.String
+		task.Operator = operator.String
 		if claimedBy.Valid {
 			task.ClaimedBy = claimedBy.String
 		}

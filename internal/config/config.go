@@ -42,6 +42,13 @@ type Config struct {
 
 	// Verbose mode for debugging
 	Verbose bool
+
+	// Worktree pool settings
+	PoolEnabled      bool
+	PoolMinSize      int
+	PoolMaxSize      int
+	PoolWarmup       time.Duration
+	PoolCleanupOnExit bool
 }
 
 // Load loads configuration from environment and defaults
@@ -60,6 +67,11 @@ func Load() (*Config, error) {
 		AgentPath:       "claude", // Will be resolved based on AgentType
 		ClaudePath:      "claude", // Deprecated but kept for backwards compatibility
 		AutoSyncBeads:   false,    // Default to off for backwards compatibility
+		PoolEnabled:     false,    // Worktree pooling disabled by default
+		PoolMinSize:     2,        // Minimum warm worktrees
+		PoolMaxSize:     10,       // Maximum pooled worktrees
+		PoolWarmup:      5 * time.Minute,
+		PoolCleanupOnExit: true,   // Clean up pooled worktrees on exit
 	}
 
 	// Environment overrides
@@ -84,6 +96,21 @@ func Load() (*Config, error) {
 		// Deprecated: DROVER_CLAUDE_PATH for backwards compatibility
 		cfg.AgentPath = v
 		cfg.ClaudePath = v
+	}
+	if v := os.Getenv("DROVER_POOL_ENABLED"); v != "" {
+		cfg.PoolEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_POOL_MIN_SIZE"); v != "" {
+		cfg.PoolMinSize = parseIntOrDefault(v, 2)
+	}
+	if v := os.Getenv("DROVER_POOL_MAX_SIZE"); v != "" {
+		cfg.PoolMaxSize = parseIntOrDefault(v, 10)
+	}
+	if v := os.Getenv("DROVER_POOL_WARMUP"); v != "" {
+		cfg.PoolWarmup = parseDurationOrDefault(v, 5*time.Minute)
+	}
+	if v := os.Getenv("DROVER_POOL_CLEANUP_ON_EXIT"); v != "" {
+		cfg.PoolCleanupOnExit = v == "true" || v == "1"
 	}
 
 	// Resolve AgentPath based on AgentType if not explicitly set

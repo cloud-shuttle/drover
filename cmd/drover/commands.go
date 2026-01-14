@@ -122,6 +122,9 @@ func runCmd() *cobra.Command {
 	var workers int
 	var epicID string
 	var verbose bool
+	var poolEnabled bool
+	var poolMinSize int
+	var poolMaxSize int
 
 	cmd := &cobra.Command{
 		Use:   "run",
@@ -133,7 +136,11 @@ to control parallelism. Use --epic to filter execution to a specific epic.
 
 DBOS Workflow Engine:
 - Default: SQLite-based orchestration (zero setup)
-- With DBOS_SYSTEM_DATABASE_URL: DBOS with PostgreSQL (production mode)`,
+- With DBOS_SYSTEM_DATABASE_URL: DBOS with PostgreSQL (production mode)
+
+Worktree Pooling:
+Use --pool to enable worktree pooling for faster cold-start times.
+Pre-warmed worktrees reduce setup time for tasks.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			projectDir, store, err := requireProject()
 			if err != nil {
@@ -141,12 +148,19 @@ DBOS Workflow Engine:
 			}
 			defer store.Close()
 
-			// Override config if workers flag specified
+			// Override config if flags specified
 			runCfg := *cfg
 			if workers > 0 {
 				runCfg.Workers = workers
 			}
 			runCfg.Verbose = verbose
+			runCfg.PoolEnabled = poolEnabled
+			if poolMinSize > 0 {
+				runCfg.PoolMinSize = poolMinSize
+			}
+			if poolMaxSize > 0 {
+				runCfg.PoolMaxSize = poolMaxSize
+			}
 
 			// Check if DBOS mode is enabled via environment variable
 			dbosURL := os.Getenv("DBOS_SYSTEM_DATABASE_URL")
@@ -164,6 +178,9 @@ DBOS Workflow Engine:
 	cmd.Flags().IntVarP(&workers, "workers", "w", 0, "Number of parallel workers")
 	cmd.Flags().StringVar(&epicID, "epic", "", "Filter to specific epic")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging for debugging")
+	cmd.Flags().BoolVar(&poolEnabled, "pool", false, "Enable worktree pooling for faster cold-start")
+	cmd.Flags().IntVar(&poolMinSize, "pool-min", 0, "Minimum warm worktrees (default: 2)")
+	cmd.Flags().IntVar(&poolMaxSize, "pool-max", 0, "Maximum pooled worktrees (default: 10)")
 
 	return cmd
 }
@@ -395,6 +412,131 @@ Maximum depth is 2 levels (Epic → Parent → Child).`,
 	return command
 }
 
+// quickCmd creates a task with minimal input for rapid capture
+func quickCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "quick <title>",
+		Short: "Quickly create a task (no validation, minimal prompts)",
+		Long: `Quickly create a task with minimal friction.
+
+Skips all validation and prompts. Just provide a title and go.
+Perfect for capturing ideas quickly during meetings or brainstorming.
+
+Examples:
+  drover quick "Fix the login bug"
+  drover quick "Investigate the memory leak in worker pool"
+  drover quick "Add dark mode to dashboard"`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			title := args[0]
+
+			// Create task without any validation
+			task, err := store.CreateTask(title, "", "", 0, nil)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("⚡ Quick capture: %s\n", task.ID)
+			fmt.Printf("   %s\n", task.Title)
+			return nil
+		},
+	}
+}
+
+// watchCmd provides a standalone watch command for live status updates
+func watchCmd() *cobra.Command {
+	var onelineMode bool
+
+	command := &cobra.Command{
+		Use:   "watch",
+		Short: "Watch status updates in real-time",
+		Long: `Continuously display task status with auto-refresh.
+
+This provides a lightweight alternative to running the full workflow.
+Press Ctrl+C to exit.
+
+Examples:
+  drover watch          # Full status display
+  drover watch --oneline # Compact one-line display`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			// Clear screen on start
+			fmt.Print("\033[H\033[2J")
+
+			// Set up signal handling for graceful exit
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+			// Create a ticker for regular updates
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+
+			var lastStatus *db.ProjectStatus
+
+			for {
+				select {
+				case <-sigChan:
+					// User pressed Ctrl+C
+					fmt.Println("\n\n👋 Watch mode stopped")
+					return nil
+
+				case <-ticker.C:
+					// Get fresh status
+					status, err := store.GetProjectStatus()
+					if err != nil {
+						fmt.Printf("\nError getting status: %v\n", err)
+						return err
+					}
+
+					// Only update if something changed
+					if lastStatus == nil || statusChanged(lastStatus, status) {
+						// Clear screen and move cursor to top-left
+						fmt.Print("\033[H\033[2J")
+
+						if onelineMode {
+							// Compact one-line display
+							fmt.Printf("🐂 [%s] %s\n", time.Now().Format("15:04:05"),
+								printStatusOnelineContent(status))
+						} else {
+							// Full status display with header
+							fmt.Printf("🐂 Drover Watch (live - %s)\n", time.Now().Format("15:04:05"))
+							fmt.Println("════════════════════════════════════════")
+							fmt.Printf("\nTotal:      %d\n", status.Total)
+							fmt.Printf("Ready:      %d\n", status.Ready)
+							fmt.Printf("In Progress: %d\n", status.InProgress)
+							fmt.Printf("Completed:  %d\n", status.Completed)
+							fmt.Printf("Failed:     %d\n", status.Failed)
+							fmt.Printf("Blocked:    %d\n", status.Blocked)
+
+							if status.Total > 0 {
+								progress := float64(status.Completed) / float64(status.Total) * 100
+								fmt.Printf("\nProgress: %.1f%%\n", progress)
+								printProgressBarCompact(progress)
+							}
+						}
+
+						lastStatus = status
+					}
+				}
+			}
+		},
+	}
+
+	command.Flags().BoolVar(&onelineMode, "oneline", false, "Show compact one-line display")
+	return command
+}
+
 func epicCmd() *cobra.Command {
 	epicAdd := &cobra.Command{
 		Use:   "add <title>",
@@ -435,6 +577,7 @@ func epicCmd() *cobra.Command {
 func statusCmd() *cobra.Command {
 	var watchMode bool
 	var treeMode bool
+	var onelineMode bool
 
 	command := &cobra.Command{
 		Use:   "status",
@@ -459,6 +602,11 @@ func statusCmd() *cobra.Command {
 				return err
 			}
 
+			if onelineMode {
+				printStatusOneline(status)
+				return nil
+			}
+
 			printStatus(status)
 			return nil
 		},
@@ -466,6 +614,7 @@ func statusCmd() *cobra.Command {
 
 	command.Flags().BoolVarP(&watchMode, "watch", "w", false, "Watch mode - live updates")
 	command.Flags().BoolVarP(&treeMode, "tree", "t", false, "Tree mode - show hierarchical view")
+	command.Flags().BoolVar(&onelineMode, "oneline", false, "Single line summary (e.g., for shell prompts)")
 	return command
 }
 
@@ -832,8 +981,38 @@ func printStatus(status *db.ProjectStatus) {
 	}
 }
 
+// printStatusOneline prints a single-line status summary
+// Format: "X running, Y queued, Z completed, W blocked"
+// Useful for shell prompt integration
+func printStatusOneline(status *db.ProjectStatus) {
+	fmt.Printf("%d running, %d queued, %d completed, %d blocked",
+		status.InProgress, status.Ready, status.Completed, status.Blocked)
+}
+
+// printStatusOnelineContent returns the oneline string without printing
+func printStatusOnelineContent(status *db.ProjectStatus) string {
+	return fmt.Sprintf("%d running, %d queued, %d completed, %d blocked",
+		status.InProgress, status.Ready, status.Completed, status.Blocked)
+}
+
 func printProgressBar(percent float64) {
 	width := 40
+	filled := int(percent / 100 * float64(width))
+
+	fmt.Print("[")
+	for i := 0; i < width; i++ {
+		if i < filled {
+			fmt.Print("█")
+		} else {
+			fmt.Print("░")
+		}
+	}
+	fmt.Printf("] %.1f%%\n", percent)
+}
+
+// printProgressBarCompact prints a shorter progress bar
+func printProgressBarCompact(percent float64) {
+	width := 20
 	filled := int(percent / 100 * float64(width))
 
 	fmt.Print("[")

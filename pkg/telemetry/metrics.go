@@ -29,6 +29,11 @@ var (
 	agentPromptsCounter       metric.Int64Counter
 	agentToolCallsCounter     metric.Int64Counter
 	agentErrorsCounter        metric.Int64Counter
+
+	// Sync counters
+	syncCompletedCounter  metric.Int64Counter
+	syncFailedCounter     metric.Int64Counter
+	syncBytesCounter      metric.Int64Counter
 )
 
 // Gauge instruments
@@ -37,6 +42,7 @@ var (
 	workersActiveGauge      metric.Int64ObservableGauge
 	tasksPendingGauge       metric.Int64ObservableGauge
 	worktreesActiveGauge    metric.Int64ObservableGauge
+	worktreesSyncingGauge   metric.Int64ObservableGauge
 )
 
 // Histogram instruments
@@ -45,6 +51,7 @@ var (
 	agentDurationHistogram      metric.Float64Histogram
 	claimLatencyHistogram       metric.Float64Histogram
 	worktreeSetupHistogram      metric.Float64Histogram
+	syncDurationHistogram       metric.Float64Histogram
 )
 
 // initMetrics initializes all metric instruments
@@ -127,6 +134,31 @@ func initMetrics() error {
 		return err
 	}
 
+	// Sync counters
+	if syncCompletedCounter, err = meter.Int64Counter(
+		"drover_sync_completed_total",
+		metric.WithDescription("Total number of successful worktree sync operations"),
+		metric.WithUnit("{sync}"),
+	); err != nil {
+		return err
+	}
+
+	if syncFailedCounter, err = meter.Int64Counter(
+		"drover_sync_failed_total",
+		metric.WithDescription("Total number of failed worktree sync operations"),
+		metric.WithUnit("{sync}"),
+	); err != nil {
+		return err
+	}
+
+	if syncBytesCounter, err = meter.Int64Counter(
+		"drover_sync_bytes_total",
+		metric.WithDescription("Total bytes transferred during sync operations"),
+		metric.WithUnit("By"),
+	); err != nil {
+		return err
+	}
+
 	// Histograms
 	if taskDurationHistogram, err = meter.Float64Histogram(
 		"drover_task_duration_seconds",
@@ -160,6 +192,14 @@ func initMetrics() error {
 		return err
 	}
 
+	if syncDurationHistogram, err = meter.Float64Histogram(
+		"drover_sync_duration_seconds",
+		metric.WithDescription("Duration of worktree sync (git fetch) operations"),
+		metric.WithUnit("s"),
+	); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -185,7 +225,7 @@ func RecordTaskClaimed(ctx context.Context, workerID, projectID string) {
 }
 
 // RecordTaskCompleted records that a task completed successfully
-func RecordTaskCompleted(ctx context.Context, workerID, projectID string, duration time.Duration) {
+func RecordTaskCompleted(ctx context.Context, workerID, projectID, taskType string, duration time.Duration) {
 	if tasksCompletedCounter == nil {
 		return
 	}
@@ -193,6 +233,7 @@ func RecordTaskCompleted(ctx context.Context, workerID, projectID string, durati
 		metric.WithAttributes(
 			attribute.String(KeyWorkerID, workerID),
 			attribute.String(KeyProjectID, projectID),
+			attribute.String(KeyTaskType, taskType),
 		),
 	)
 	if taskDurationHistogram != nil {
@@ -200,13 +241,14 @@ func RecordTaskCompleted(ctx context.Context, workerID, projectID string, durati
 			metric.WithAttributes(
 				attribute.String(KeyProjectID, projectID),
 				attribute.String(KeyTaskState, "completed"),
+				attribute.String(KeyTaskType, taskType),
 			),
 		)
 	}
 }
 
 // RecordTaskFailed records that a task failed
-func RecordTaskFailed(ctx context.Context, workerID, projectID, errorType string, duration time.Duration) {
+func RecordTaskFailed(ctx context.Context, workerID, projectID, taskType, errorType string, duration time.Duration) {
 	if tasksFailedCounter == nil {
 		return
 	}
@@ -214,6 +256,7 @@ func RecordTaskFailed(ctx context.Context, workerID, projectID, errorType string
 		metric.WithAttributes(
 			attribute.String(KeyWorkerID, workerID),
 			attribute.String(KeyProjectID, projectID),
+			attribute.String(KeyTaskType, taskType),
 			attribute.String(KeyErrorType, errorType),
 		),
 	)
@@ -222,6 +265,7 @@ func RecordTaskFailed(ctx context.Context, workerID, projectID, errorType string
 			metric.WithAttributes(
 				attribute.String(KeyProjectID, projectID),
 				attribute.String(KeyTaskState, "failed"),
+				attribute.String(KeyTaskType, taskType),
 				attribute.String(KeyErrorType, errorType),
 			),
 		)
@@ -335,6 +379,59 @@ func RecordWorktreeSetup(ctx context.Context, duration time.Duration) {
 		return
 	}
 	worktreeSetupHistogram.Record(ctx, duration.Seconds())
+}
+
+// Sync metric recording functions
+
+// RecordSyncCompleted records a successful worktree sync operation
+func RecordSyncCompleted(ctx context.Context, worktreeID, projectID string, duration time.Duration, bytes int64) {
+	if syncCompletedCounter == nil {
+		return
+	}
+	syncCompletedCounter.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("drover.sync.worktree_id", worktreeID),
+			attribute.String(KeyProjectID, projectID),
+		),
+	)
+	if syncDurationHistogram != nil {
+		syncDurationHistogram.Record(ctx, duration.Seconds(),
+			metric.WithAttributes(
+				attribute.String(KeyProjectID, projectID),
+				attribute.String("drover.sync.status", "completed"),
+			),
+		)
+	}
+	if syncBytesCounter != nil && bytes > 0 {
+		syncBytesCounter.Add(ctx, bytes,
+			metric.WithAttributes(
+				attribute.String(KeyProjectID, projectID),
+			),
+		)
+	}
+}
+
+// RecordSyncFailed records a failed worktree sync operation
+func RecordSyncFailed(ctx context.Context, worktreeID, projectID, errorType string, duration time.Duration) {
+	if syncFailedCounter == nil {
+		return
+	}
+	syncFailedCounter.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("drover.sync.worktree_id", worktreeID),
+			attribute.String(KeyProjectID, projectID),
+			attribute.String(KeyErrorType, errorType),
+		),
+	)
+	if syncDurationHistogram != nil {
+		syncDurationHistogram.Record(ctx, duration.Seconds(),
+			metric.WithAttributes(
+				attribute.String(KeyProjectID, projectID),
+				attribute.String("drover.sync.status", "failed"),
+				attribute.String(KeyErrorType, errorType),
+			),
+		)
+	}
 }
 
 // Gauges are typically set via callbacks in production.

@@ -13,6 +13,20 @@ const (
 	TaskStatusFailed     TaskStatus = "failed"
 )
 
+// TaskType represents the type of work a task represents
+type TaskType string
+
+const (
+	TaskTypeFeature  TaskType = "feature"  // New feature implementation
+	TaskTypeBug      TaskType = "bug"      // Bug fix
+	TaskTypeRefactor TaskType = "refactor" // Code refactoring
+	TaskTypeTest     TaskType = "test"     // Test writing/fixing
+	TaskTypeDocs     TaskType = "docs"     // Documentation
+	TaskTypeResearch TaskType = "research" // Research/investigation
+	TaskTypeFix      TaskType = "fix"      // Fix task (created for blockers)
+	TaskTypeOther    TaskType = "other"    // Other type
+)
+
 // Task represents a unit of work for an AI agent
 type Task struct {
 	ID             string     `json:"id" db:"id"`
@@ -21,6 +35,7 @@ type Task struct {
 	EpicID         string     `json:"epic_id" db:"epic_id"`
 	ParentID       string     `json:"parent_id,omitempty" db:"parent_id"`           // Parent task ID for sub-tasks
 	SequenceNumber int        `json:"sequence_number,omitempty" db:"sequence_number"` // Position among siblings (1-indexed)
+	Type           TaskType   `json:"type" db:"type"`                                 // Task type (feature, bug, etc.)
 	Priority       int        `json:"priority" db:"priority"`
 	Status         TaskStatus `json:"status" db:"status"`
 	Attempts       int        `json:"attempts" db:"attempts"`
@@ -28,6 +43,7 @@ type Task struct {
 	LastError      string     `json:"last_error" db:"last_error"`
 	ClaimedBy      string     `json:"claimed_by" db:"claimed_by"`
 	ClaimedAt      *int64     `json:"claimed_at" db:"claimed_at"`
+	Operator       string     `json:"operator" db:"operator"` // The operator/user who created or claimed this task
 	CreatedAt      int64      `json:"created_at" db:"created_at"`
 	UpdatedAt      int64      `json:"updated_at" db:"updated_at"`
 }
