@@ -373,6 +373,27 @@ func (s *Store) CreateEpic(title, description string) (*types.Epic, error) {
 	return epic, nil
 }
 
+// UpdateEpicStatus sets the status of an epic using the typed EpicStatus.
+func (s *Store) UpdateEpicStatus(epicID string, status types.EpicStatus) error {
+	result, err := s.DB.Exec(`
+		UPDATE epics
+		SET status = ?
+		WHERE id = ?
+	`, string(status), epicID)
+	if err != nil {
+		return fmt.Errorf("updating epic status: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("getting rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("epic not found: %s", epicID)
+	}
+	return nil
+}
+
 // CreateTask creates a new task with optional dependencies
 func (s *Store) CreateTask(title, description, epicID string, priority int, blockedBy []string) (*types.Task, error) {
 	return s.CreateTaskWithOperator(title, description, epicID, priority, blockedBy, "")
@@ -1143,15 +1164,15 @@ func (s *Store) ListAllDependencies() ([]types.TaskDependency, error) {
 
 // WorktreeInfo represents a worktree with its metadata
 type WorktreeInfo struct {
-	TaskID      string
-	Path        string
-	Branch      string
-	CreatedAt   int64
-	LastUsedAt  int64
-	Status      string
-	DiskSize    int64
-	TaskStatus  string
-	TaskTitle   string
+	TaskID     string
+	Path       string
+	Branch     string
+	CreatedAt  int64
+	LastUsedAt int64
+	Status     string
+	DiskSize   int64
+	TaskStatus string
+	TaskTitle  string
 }
 
 // CreateWorktree records a new worktree in the database
