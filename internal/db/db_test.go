@@ -596,3 +596,86 @@ func TestStore_ResetTasksByIDs_Empty(t *testing.T) {
 		t.Errorf("Expected task status to still be 'completed', got '%s'", status)
 	}
 }
+
+func TestStore_UpdateEpicStatus(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	// Create a test epic
+	epic, err := store.CreateEpic("Test Epic", "Test Description")
+	if err != nil {
+		t.Fatalf("Failed to create epic: %v", err)
+	}
+
+	// Verify initial status
+	if epic.Status != types.EpicStatusOpen {
+		t.Errorf("Expected initial status to be 'open', got '%s'", epic.Status)
+	}
+
+	// Update epic status to closed
+	err = store.UpdateEpicStatus(epic.ID, types.EpicStatusClosed)
+	if err != nil {
+		t.Fatalf("Failed to update epic status: %v", err)
+	}
+
+	// Retrieve the epic and verify status was updated
+	epics, err := store.ListEpics()
+	if err != nil {
+		t.Fatalf("Failed to list epics: %v", err)
+	}
+
+	if len(epics) != 1 {
+		t.Fatalf("Expected 1 epic, got %d", len(epics))
+	}
+
+	if epics[0].Status != types.EpicStatusClosed {
+		t.Errorf("Expected epic status to be 'closed', got '%s'", epics[0].Status)
+	}
+
+	// Update back to open
+	err = store.UpdateEpicStatus(epic.ID, types.EpicStatusOpen)
+	if err != nil {
+		t.Fatalf("Failed to update epic status back to open: %v", err)
+	}
+
+	// Verify it was updated
+	epics, err = store.ListEpics()
+	if err != nil {
+		t.Fatalf("Failed to list epics: %v", err)
+	}
+
+	if epics[0].Status != types.EpicStatusOpen {
+		t.Errorf("Expected epic status to be 'open', got '%s'", epics[0].Status)
+	}
+}
+
+func TestStore_UpdateEpicStatus_NotFound(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	// Try to update a non-existent epic
+	err := store.UpdateEpicStatus("epic-nonexistent", types.EpicStatusClosed)
+	if err == nil {
+		t.Fatal("Expected error when updating non-existent epic, got nil")
+	}
+
+	// Verify error message mentions epic not found
+	expectedMsg := "epic not found"
+	if !contains(err.Error(), expectedMsg) {
+		t.Errorf("Expected error to contain '%s', got '%s'", expectedMsg, err.Error())
+	}
+}
+
+// Helper function to check if a string contains a substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && stringContains(s, substr))
+}
+
+func stringContains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}

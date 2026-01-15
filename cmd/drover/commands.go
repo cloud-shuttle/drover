@@ -19,8 +19,8 @@ import (
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/internal/template"
-	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/cloud-shuttle/drover/internal/workflow"
+	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/spf13/cobra"
 )
@@ -299,11 +299,11 @@ func runWithSQLite(cmd *cobra.Command, runCfg *config.Config, store *db.Store, p
 
 func addCmd() *cobra.Command {
 	var (
-		desc      string
-		epicID    string
-		parentID  string
-		priority  int
-		blockedBy []string
+		desc           string
+		epicID         string
+		parentID       string
+		priority       int
+		blockedBy      []string
 		skipValidation bool
 	)
 
@@ -321,7 +321,7 @@ Hierarchical Tasks:
     drover add "Sub-task title" --parent task-123
 
 Maximum depth is 2 levels (Epic → Parent → Child).`,
-		Args:  cobra.ExactArgs(1),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			_, store, err := requireProject()
 			if err != nil {
@@ -574,7 +574,64 @@ func epicCmd() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	command.AddCommand(epicAdd)
+	// epic list - show all epics
+	epicList := &cobra.Command{
+		Use:   "list",
+		Short: "List all epics",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			epics, err := store.ListEpics()
+			if err != nil {
+				return fmt.Errorf("listing epics: %w", err)
+			}
+
+			if len(epics) == 0 {
+				fmt.Println("No epics found. Create one with: drover epic add \"My Epic\"")
+				return nil
+			}
+
+			for _, epic := range epics {
+				emoji := "📘"
+				switch string(epic.Status) {
+				case "open":
+					emoji = "📖"
+				case "closed":
+					emoji = "📕"
+				}
+				fmt.Printf("%s  %s — %s (%s)\n", emoji, epic.ID, epic.Title, epic.Status)
+			}
+
+			return nil
+		},
+	}
+
+	// epic close - close an epic
+	epicClose := &cobra.Command{
+		Use:   "close <epic-id>",
+		Short: "Close an epic",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			epicID := args[0]
+			if err := store.UpdateEpicStatus(epicID, types.EpicStatusClosed); err != nil {
+				return err
+			}
+			fmt.Printf("🔒 Closed epic %s\n", epicID)
+			return nil
+		},
+	}
+
+	command.AddCommand(epicAdd, epicList, epicClose)
 	return command
 }
 
@@ -694,10 +751,10 @@ and other metadata. Useful for inspecting individual task details.`,
 
 func resetCmd() *cobra.Command {
 	var (
-		resetCompleted bool
+		resetCompleted  bool
 		resetInProgress bool
-		resetClaimed bool
-		resetFailed bool
+		resetClaimed    bool
+		resetFailed     bool
 	)
 
 	command := &cobra.Command{
@@ -941,13 +998,13 @@ func exportSession(projectDir string, store *db.Store, outputPath, format string
 
 	// Build session export
 	session := map[string]interface{}{
-		"version":   "1.0",
-		"exportedAt": time.Now().Format(time.RFC3339),
-		"repository": projectDir,
-		"tasks":     tasks,
-		"epics":     epics,
+		"version":      "1.0",
+		"exportedAt":   time.Now().Format(time.RFC3339),
+		"repository":   projectDir,
+		"tasks":        tasks,
+		"epics":        epics,
 		"dependencies": dependencies,
-		"worktrees": worktrees,
+		"worktrees":    worktrees,
 	}
 
 	// Determine output path
@@ -1912,6 +1969,7 @@ func formatTimestamp(timestamp int64) string {
 	t := time.Unix(timestamp, 0)
 	return t.Format("2006-01-02 15:04:05")
 }
+
 // worktreeCmd returns the worktree management command
 func worktreeCmd() *cobra.Command {
 	cmd := &cobra.Command{

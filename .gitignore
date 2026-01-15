@@ -1,5 +1,5 @@
 # Binaries
-drover
+/drover
 *.exe
 *.exe~
 *.dll
