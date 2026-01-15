@@ -574,7 +574,64 @@ func epicCmd() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	command.AddCommand(epicAdd)
+	// epic list - show all epics
+	epicList := &cobra.Command{
+		Use:   "list",
+		Short: "List all epics",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			epics, err := store.ListEpics()
+			if err != nil {
+				return fmt.Errorf("listing epics: %w", err)
+			}
+
+			if len(epics) == 0 {
+				fmt.Println("No epics found. Create one with: drover epic add \"My Epic\"")
+				return nil
+			}
+
+			for _, epic := range epics {
+				emoji := "📘"
+				switch string(epic.Status) {
+				case "open":
+					emoji = "📖"
+				case "closed":
+					emoji = "📕"
+				}
+				fmt.Printf("%s  %s — %s (%s)\n", emoji, epic.ID, epic.Title, epic.Status)
+			}
+
+			return nil
+		},
+	}
+
+	// epic close - close an epic
+	epicClose := &cobra.Command{
+		Use:   "close <epic-id>",
+		Short: "Close an epic",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			epicID := args[0]
+			if err := store.UpdateEpicStatus(epicID, types.EpicStatusClosed); err != nil {
+				return err
+			}
+			fmt.Printf("🔒 Closed epic %s\n", epicID)
+			return nil
+		},
+	}
+
+	command.AddCommand(epicAdd, epicList, epicClose)
 	return command
 }
 
