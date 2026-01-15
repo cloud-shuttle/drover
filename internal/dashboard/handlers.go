@@ -2,7 +2,6 @@ package dashboard
 
 import (
 	"encoding/json"
-	"io"
 	"net/http"
 	"path/filepath"
 	"slices"

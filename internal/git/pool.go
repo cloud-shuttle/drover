@@ -622,7 +622,7 @@ func (p *WorktreePool) warmupWorktree(ctx context.Context, wt *PooledWorktree) {
 	cmd.Dir = p.manager.baseDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("❌ Failed to create worktree for %s: %w\n%s", wt.ID, err, output)
+		log.Printf("❌ Failed to create worktree for %s: %v\n%s", wt.ID, err, output)
 		wt.mu.Lock()
 		wt.State = StateDraining
 		wt.mu.Unlock()

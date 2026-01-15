@@ -6,13 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/config"
+	"github.com/cloud-shuttle/drover/internal/dashboard"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/internal/template"
@@ -1196,8 +1199,11 @@ Examples:
 			if continueExecution {
 				fmt.Println("\n▶️  Starting execution...")
 				// Create a new orchestrator and run
-				cfg := config.DefaultConfig()
-				orch, err := workflow.NewOrchestrator(cfg, store, projectDir)
+				runCfg, err := config.Load()
+				if err != nil {
+					return fmt.Errorf("loading config: %w", err)
+				}
+				orch, err := workflow.NewOrchestrator(runCfg, store, projectDir)
 				if err != nil {
 					return fmt.Errorf("creating orchestrator: %w", err)
 				}
@@ -1297,20 +1303,14 @@ Examples:
 			}
 			defer store.Close()
 
-			// Get repository info
-			repo, err := git.GetRepo(projectDir)
-			if err != nil {
-				return fmt.Errorf("getting repository info: %w", err)
-			}
-
 			// Get operator name
 			operator := config.GetOperator()
 
-			// Create session export
+			// Create session export (use project directory name as repo name)
 			session := db.SessionExport{
-				Version:  "1.0",
+				Version:    "1.0",
 				ExportedAt: time.Now().Format(time.RFC3339),
-				Repository: repo.Name,
+				Repository: filepath.Base(projectDir),
 			}
 
 			// Get all epics
@@ -1428,8 +1428,11 @@ Examples:
 
 			if continueExecution {
 				fmt.Println("\n▶️  Starting execution...")
-				cfg := config.DefaultConfig()
-				orch, err := workflow.NewOrchestrator(cfg, store, projectDir)
+				runCfg, err := config.Load()
+				if err != nil {
+					return fmt.Errorf("loading config: %w", err)
+				}
+				orch, err := workflow.NewOrchestrator(runCfg, store, projectDir)
 				if err != nil {
 					return fmt.Errorf("creating orchestrator: %w", err)
 				}
@@ -2361,7 +2364,17 @@ func runDashboard(store *db.Store, projectDir string, port string, openBrowser b
 	if openBrowser {
 		go func() {
 			time.Sleep(500 * time.Millisecond)
-			browser.OpenURL(fmt.Sprintf("http://localhost%s", port))
+			url := fmt.Sprintf("http://localhost:%s", port)
+			var cmd *exec.Cmd
+			switch runtime.GOOS {
+			case "darwin":
+				cmd = exec.Command("open", url)
+			case "windows":
+				cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+			default: // linux, bsd, etc.
+				cmd = exec.Command("xdg-open", url)
+			}
+			_ = cmd.Run()
 		}()
 	}
 
