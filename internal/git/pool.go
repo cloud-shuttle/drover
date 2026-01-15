@@ -78,6 +78,7 @@ type PoolConfig struct {
 	CleanupOnExit   bool          // Whether to clean up pooled worktrees on exit
 	EnableSymlinks  bool          // Enable shared node_modules via symlinks
 	GoModCache      bool          // Enable Go module cache sharing
+	CargoTargetDir  bool          // Enable shared Cargo target directory for Rust projects
 }
 
 // DefaultPoolConfig returns sensible defaults for the pool
@@ -90,6 +91,7 @@ func DefaultPoolConfig() *PoolConfig {
 		CleanupOnExit:      true,
 		EnableSymlinks:     true,
 		GoModCache:         true,
+		CargoTargetDir:     true,
 	}
 }
 
@@ -107,8 +109,9 @@ type WorktreePool struct {
 	shutdownCh chan struct{}
 
 	// Dependency cache paths
-	sharedNodeModules string  // Path to shared node_modules
-	sharedGoModCache  string  // Path to Go module cache (GOMODCACHE)
+	sharedNodeModules  string // Path to shared node_modules
+	sharedGoModCache   string // Path to Go module cache (GOMODCACHE)
+	sharedCargoTarget  string // Path to shared Cargo target directory
 }
 
 // NewWorktreePool creates a new worktree pool
@@ -695,8 +698,20 @@ func (p *WorktreePool) initDependencyCaches() error {
 		}
 	}
 
-	log.Printf("📦 Dependency caches initialized (node_modules: %s, gomodcache: %s)",
-		p.sharedNodeModules, p.sharedGoModCache)
+	// Set up shared Cargo target directory
+	if p.config.CargoTargetDir {
+		p.sharedCargoTarget = filepath.Join(cacheDir, "cargo_target_shared")
+		if err := os.MkdirAll(p.sharedCargoTarget, 0755); err != nil {
+			return fmt.Errorf("creating shared Cargo target directory: %w", err)
+		}
+		// Set CARGO_TARGET_DIR environment variable for child processes
+		if err := os.Setenv("CARGO_TARGET_DIR", p.sharedCargoTarget); err != nil {
+			log.Printf("⚠️  Failed to set CARGO_TARGET_DIR: %v", err)
+		}
+	}
+
+	log.Printf("📦 Dependency caches initialized (node_modules: %s, gomodcache: %s, cargo_target: %s)",
+		p.sharedNodeModules, p.sharedGoModCache, p.sharedCargoTarget)
 
 	return nil
 }
@@ -781,12 +796,18 @@ func (p *WorktreePool) GetSharedGoModCachePath() string {
 	return p.sharedGoModCache
 }
 
+// GetSharedCargoTargetPath returns the path to the shared Cargo target directory
+func (p *WorktreePool) GetSharedCargoTargetPath() string {
+	return p.sharedCargoTarget
+}
+
 // CacheState tracks the state of dependency caches
 type CacheState struct {
 	NodeModulesHash string `json:"node_modules_hash,omitempty"`
 	GoSumHash       string `json:"go_sum_hash,omitempty"`
 	YarnLockHash    string `json:"yarn_lock_hash,omitempty"`
 	PackageLockHash string `json:"package_lock_hash,omitempty"`
+	CargoLockHash   string `json:"cargo_lock_hash,omitempty"`
 	LastUpdated     int64  `json:"last_updated"`
 }
 
@@ -865,6 +886,7 @@ func (p *WorktreePool) checkCacheInvalidation() (bool, error) {
 		{"package-lock.json", oldState.PackageLockHash, "", "package_lock_hash"},
 		{"yarn.lock", oldState.YarnLockHash, "", "yarn_lock_hash"},
 		{"go.sum", oldState.GoSumHash, "", "go_sum_hash"},
+		{"Cargo.lock", oldState.CargoLockHash, "", "cargo_lock_hash"},
 	}
 
 	needsRebuild := false
@@ -897,6 +919,7 @@ func (p *WorktreePool) updateCacheState() error {
 		{"package-lock.json", "", "package_lock_hash"},
 		{"yarn.lock", "", "yarn_lock_hash"},
 		{"go.sum", "", "go_sum_hash"},
+		{"Cargo.lock", "", "cargo_lock_hash"},
 	}
 
 	state, err := p.loadCacheState()
@@ -919,6 +942,8 @@ func (p *WorktreePool) updateCacheState() error {
 			state.YarnLockHash = hash
 		case "go_sum_hash":
 			state.GoSumHash = hash
+		case "cargo_lock_hash":
+			state.CargoLockHash = hash
 		}
 	}
 
@@ -948,6 +973,17 @@ func (p *WorktreePool) rebuildDependencyCaches() error {
 		// Recreate directory
 		if err := os.MkdirAll(p.sharedGoModCache, 0755); err != nil {
 			return fmt.Errorf("recreating GOMODCACHE: %w", err)
+		}
+	}
+
+	// Remove old Cargo target directory
+	if p.sharedCargoTarget != "" {
+		if err := os.RemoveAll(p.sharedCargoTarget); err != nil {
+			log.Printf("⚠️  Failed to remove old Cargo target directory: %v", err)
+		}
+		// Recreate directory
+		if err := os.MkdirAll(p.sharedCargoTarget, 0755); err != nil {
+			return fmt.Errorf("recreating shared Cargo target directory: %w", err)
 		}
 	}
 
