@@ -26,13 +26,16 @@ func GetGlobal() *Server {
 
 // Event types for WebSocket broadcasting
 const (
-	EventTaskClaimed   = "task_claimed"
-	EventTaskStarted   = "task_started"
-	EventTaskCompleted = "task_completed"
-	EventTaskFailed    = "task_failed"
-	EventTaskBlocked   = "task_blocked"
-	EventWorkerStatus  = "worker_status"
-	EventStatsUpdate   = "stats_update"
+	EventTaskClaimed    = "task_claimed"
+	EventTaskStarted    = "task_started"
+	EventTaskCompleted  = "task_completed"
+	EventTaskFailed     = "task_failed"
+	EventTaskBlocked    = "task_blocked"
+	EventTaskPaused     = "task_paused"
+	EventTaskResumed    = "task_resumed"
+	EventTaskGuidance   = "task_guidance"
+	EventWorkerStatus   = "worker_status"
+	EventStatsUpdate    = "stats_update"
 )
 
 // TaskEvent is broadcast when a task state changes
@@ -124,4 +127,58 @@ func BroadcastStatsUpdate() {
 		return
 	}
 	dash.Broadcast(EventStatsUpdate, stats)
+}
+
+// BroadcastTaskPaused broadcasts when a task is paused
+func BroadcastTaskPaused(taskID string) {
+	dash := GetGlobal()
+	if dash == nil {
+		return
+	}
+	task, err := dash.store.GetTask(taskID)
+	if err != nil {
+		return
+	}
+	dash.Broadcast(EventTaskPaused, TaskEvent{
+		TaskID: taskID,
+		Title:  task.Title,
+		Status: "paused",
+	})
+	BroadcastStatsUpdate()
+}
+
+// BroadcastTaskResumed broadcasts when a task is resumed
+func BroadcastTaskResumed(taskID string) {
+	dash := GetGlobal()
+	if dash == nil {
+		return
+	}
+	task, err := dash.store.GetTask(taskID)
+	if err != nil {
+		return
+	}
+	dash.Broadcast(EventTaskResumed, TaskEvent{
+		TaskID: taskID,
+		Title:  task.Title,
+		Status: "ready",
+	})
+	BroadcastStatsUpdate()
+}
+
+// BroadcastTaskGuidance broadcasts when guidance is added to a task
+func BroadcastTaskGuidance(taskID, message string) {
+	dash := GetGlobal()
+	if dash == nil {
+		return
+	}
+	task, err := dash.store.GetTask(taskID)
+	if err != nil {
+		return
+	}
+	dash.Broadcast(EventTaskGuidance, TaskEvent{
+		TaskID: taskID,
+		Title:  task.Title,
+		Status: string(task.Status),
+	})
+	BroadcastStatsUpdate()
 }

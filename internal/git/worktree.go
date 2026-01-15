@@ -71,6 +71,37 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 	return worktreePath, nil
 }
 
+// GetWorktreePath returns the path to a worktree for a task, if it exists
+func (wm *WorktreeManager) GetWorktreePath(taskID string) (string, error) {
+	worktreePath := filepath.Join(wm.worktreeDir, taskID)
+
+	// Check if worktree directory exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		return "", fmt.Errorf("worktree does not exist")
+	}
+
+	// Verify it's a valid git worktree
+	cmd := exec.Command("git", "worktree", "list", "--porcelain")
+	cmd.Dir = wm.baseDir
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("listing worktrees: %w", err)
+	}
+
+	// Parse worktree list to verify this worktree is registered
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "worktree ") {
+			path := strings.TrimPrefix(line, "worktree ")
+			if filepath.Clean(path) == filepath.Clean(worktreePath) {
+				return worktreePath, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("worktree not registered in git")
+}
+
 // cleanUpWorktree removes any existing worktree registration, branch, and directory for a task
 func (wm *WorktreeManager) cleanUpWorktree(taskID string) {
 	worktreePath := filepath.Join(wm.worktreeDir, taskID)

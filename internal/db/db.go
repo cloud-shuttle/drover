@@ -24,6 +24,7 @@ type ProjectStatus struct {
 	Ready      int
 	Claimed    int
 	InProgress int
+	Paused     int
 	Blocked    int
 	Completed  int
 	Failed     int
@@ -79,6 +80,7 @@ func (s *Store) InitSchema() error {
 		epic_id TEXT,
 		parent_id TEXT,
 		sequence_number INTEGER DEFAULT 0,
+		type TEXT DEFAULT 'other',
 		priority INTEGER DEFAULT 0,
 		status TEXT DEFAULT 'ready',
 		attempts INTEGER DEFAULT 0,
@@ -86,6 +88,7 @@ func (s *Store) InitSchema() error {
 		last_error TEXT,
 		claimed_by TEXT,
 		claimed_at INTEGER,
+		operator TEXT DEFAULT '',
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL,
 		FOREIGN KEY (epic_id) REFERENCES epics(id),
@@ -113,6 +116,25 @@ func (s *Store) InitSchema() error {
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 
+	-- Guidance queue for human-in-the-loop intervention
+	CREATE TABLE IF NOT EXISTS guidance_queue (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		message TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		delivered INTEGER DEFAULT 0,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	-- Operators for multiplayer collaboration
+	CREATE TABLE IF NOT EXISTS operators (
+		id TEXT PRIMARY KEY,
+		name TEXT UNIQUE NOT NULL,
+		api_key TEXT UNIQUE NOT NULL,
+		created_at INTEGER NOT NULL,
+		last_active INTEGER
+	);
+
 	-- Indexes for common queries
 	CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 	CREATE INDEX IF NOT EXISTS idx_tasks_epic ON tasks(epic_id);
@@ -122,6 +144,10 @@ func (s *Store) InitSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_dependencies_blocked_by ON task_dependencies(blocked_by);
 	CREATE INDEX IF NOT EXISTS idx_worktrees_status ON worktrees(status);
 	CREATE INDEX IF NOT EXISTS idx_worktrees_created ON worktrees(created_at);
+	CREATE INDEX IF NOT EXISTS idx_guidance_task ON guidance_queue(task_id);
+	CREATE INDEX IF NOT EXISTS idx_guidance_delivered ON guidance_queue(delivered);
+	CREATE INDEX IF NOT EXISTS idx_operators_name ON operators(name);
+	CREATE INDEX IF NOT EXISTS idx_operators_api_key ON operators(api_key);
 	`
 
 	_, err := s.DB.Exec(schema)
@@ -190,6 +216,135 @@ func (s *Store) MigrateSchema() error {
 		}
 	}
 
+	// Check if operator column exists (added for multiplayer collaboration)
+	var operatorExists bool
+	err = s.DB.QueryRow(`
+		SELECT COUNT(*) > 0 FROM pragma_table_info('tasks') WHERE name = 'operator'
+	`).Scan(&operatorExists)
+	if err != nil {
+		return fmt.Errorf("checking for operator column: %w", err)
+	}
+
+	if !operatorExists {
+		// Add operator column for tracking who created/owns a task
+		_, err := s.DB.Exec(`
+			ALTER TABLE tasks ADD COLUMN operator TEXT DEFAULT '';
+		`)
+		if err != nil {
+			return fmt.Errorf("adding operator column: %w", err)
+		}
+	}
+
+	// Check if type column exists (added for task categorization)
+	var typeExists bool
+	err = s.DB.QueryRow(`
+		SELECT COUNT(*) > 0 FROM pragma_table_info('tasks') WHERE name = 'type'
+	`).Scan(&typeExists)
+	if err != nil {
+		return fmt.Errorf("checking for type column: %w", err)
+	}
+
+	if !typeExists {
+		// Add type column for categorizing tasks by type
+		_, err := s.DB.Exec(`
+			ALTER TABLE tasks ADD COLUMN type TEXT DEFAULT 'other';
+		`)
+		if err != nil {
+			return fmt.Errorf("adding type column: %w", err)
+		}
+		// Create index for type-based queries
+		_, err = s.DB.Exec(`
+			CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type);
+		`)
+		if err != nil {
+			return fmt.Errorf("creating type index: %w", err)
+		}
+	}
+
+	// Check if guidance_queue table exists (added for human-in-the-loop intervention)
+	var guidanceTableExists bool
+	err = s.DB.QueryRow(`
+		SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='guidance_queue'
+	`).Scan(&guidanceTableExists)
+	if err != nil {
+		return fmt.Errorf("checking for guidance_queue table: %w", err)
+	}
+
+	if !guidanceTableExists {
+		// Create the guidance_queue table
+		_, err := s.DB.Exec(`
+			CREATE TABLE guidance_queue (
+				id TEXT PRIMARY KEY,
+				task_id TEXT NOT NULL,
+				message TEXT NOT NULL,
+				created_at INTEGER NOT NULL,
+				delivered INTEGER DEFAULT 0,
+				FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+			);
+			CREATE INDEX IF NOT EXISTS idx_guidance_task ON guidance_queue(task_id);
+			CREATE INDEX IF NOT EXISTS idx_guidance_delivered ON guidance_queue(delivered);
+		`)
+		if err != nil {
+			return fmt.Errorf("creating guidance_queue table: %w", err)
+		}
+	}
+
+	// Check if session_shares table exists (added for multiplayer session handoff)
+	var sessionSharesTableExists bool
+	err = s.DB.QueryRow(`
+		SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='session_shares'
+	`).Scan(&sessionSharesTableExists)
+	if err != nil {
+		return fmt.Errorf("checking for session_shares table: %w", err)
+	}
+
+	if !sessionSharesTableExists {
+		// Create the session_shares table for shareable session links
+		_, err := s.DB.Exec(`
+			CREATE TABLE session_shares (
+				id TEXT PRIMARY KEY,
+				token TEXT UNIQUE NOT NULL,
+				session_data TEXT NOT NULL,
+				created_by TEXT NOT NULL,
+				created_at INTEGER NOT NULL,
+				expires_at INTEGER,
+				access_count INTEGER DEFAULT 0
+			);
+			CREATE INDEX IF NOT EXISTS idx_session_shares_token ON session_shares(token);
+			CREATE INDEX IF NOT EXISTS idx_session_shares_expires ON session_shares(expires_at);
+		`)
+		if err != nil {
+			return fmt.Errorf("creating session_shares table: %w", err)
+		}
+	}
+
+	// Check if operators table exists (added for multiplayer authentication)
+	var operatorsTableExists bool
+	err = s.DB.QueryRow(`
+		SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='operators'
+	`).Scan(&operatorsTableExists)
+	if err != nil {
+		return fmt.Errorf("checking for operators table: %w", err)
+	}
+
+	if !operatorsTableExists {
+		// Create the operators table for authentication
+		_, err := s.DB.Exec(`
+			CREATE TABLE operators (
+				id TEXT PRIMARY KEY,
+				name TEXT UNIQUE NOT NULL,
+				api_key TEXT UNIQUE NOT NULL,
+				created_at INTEGER NOT NULL,
+				last_active INTEGER
+			);
+			CREATE INDEX IF NOT EXISTS idx_operators_name ON operators(name);
+			CREATE INDEX IF NOT EXISTS idx_operators_api_key ON operators(api_key);
+		`)
+		if err != nil {
+			return fmt.Errorf("creating operators table: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -220,6 +375,11 @@ func (s *Store) CreateEpic(title, description string) (*types.Epic, error) {
 
 // CreateTask creates a new task with optional dependencies
 func (s *Store) CreateTask(title, description, epicID string, priority int, blockedBy []string) (*types.Task, error) {
+	return s.CreateTaskWithOperator(title, description, epicID, priority, blockedBy, "")
+}
+
+// CreateTaskWithOperator creates a new task with an operator (user/creator)
+func (s *Store) CreateTaskWithOperator(title, description, epicID string, priority int, blockedBy []string, operator string) (*types.Task, error) {
 	id := generateID("task")
 	now := time.Now().Unix()
 
@@ -231,6 +391,7 @@ func (s *Store) CreateTask(title, description, epicID string, priority int, bloc
 		Priority:    priority,
 		Status:      types.TaskStatusReady,
 		MaxAttempts: 3,
+		Operator:    operator,
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -252,9 +413,9 @@ func (s *Store) CreateTask(title, description, epicID string, priority int, bloc
 		epicIDValue = nil
 	}
 	_, err = tx.Exec(`
-		INSERT INTO tasks (id, title, description, epic_id, priority, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, task.ID, task.Title, task.Description, epicIDValue, task.Priority, task.Status, task.CreatedAt, task.UpdatedAt)
+		INSERT INTO tasks (id, title, description, epic_id, type, priority, status, operator, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, task.ID, task.Title, task.Description, epicIDValue, task.Type, task.Priority, task.Status, task.Operator, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating task: %w", err)
 	}
@@ -303,6 +464,7 @@ func (s *Store) CreateSubTask(title, description, parentID string, priority int,
 	id := fmt.Sprintf("%s.%d", parentID, nextSeq)
 	now := time.Now().Unix()
 
+	// Inherit operator from parent task
 	task := &types.Task{
 		ID:             id,
 		Title:          title,
@@ -313,6 +475,7 @@ func (s *Store) CreateSubTask(title, description, parentID string, priority int,
 		Priority:       priority,
 		Status:         types.TaskStatusReady,
 		MaxAttempts:    3,
+		Operator:       parent.Operator, // Inherit from parent
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -337,10 +500,10 @@ func (s *Store) CreateSubTask(title, description, parentID string, priority int,
 	// Insert task
 	_, err = tx.Exec(`
 		INSERT INTO tasks (id, title, description, epic_id, parent_id, sequence_number,
-		                  priority, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                  type, priority, status, operator, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Title, task.Description, epicIDValue, task.ParentID, task.SequenceNumber,
-		task.Priority, task.Status, task.CreatedAt, task.UpdatedAt)
+		task.Type, task.Priority, task.Status, task.Operator, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating sub-task: %w", err)
 	}
@@ -391,6 +554,7 @@ func (s *Store) CreateSubTaskWithSequence(title, description, parentID string, s
 	id := fmt.Sprintf("%s.%d", parentID, sequence)
 	now := time.Now().Unix()
 
+	// Inherit operator from parent task
 	task := &types.Task{
 		ID:             id,
 		Title:          title,
@@ -401,6 +565,7 @@ func (s *Store) CreateSubTaskWithSequence(title, description, parentID string, s
 		Priority:       priority,
 		Status:         types.TaskStatusReady,
 		MaxAttempts:    3,
+		Operator:       parent.Operator, // Inherit from parent
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -425,10 +590,10 @@ func (s *Store) CreateSubTaskWithSequence(title, description, parentID string, s
 	// Insert task
 	_, err = tx.Exec(`
 		INSERT INTO tasks (id, title, description, epic_id, parent_id, sequence_number,
-		                  priority, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		                  type, priority, status, operator, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, task.ID, task.Title, task.Description, epicIDValue, task.ParentID, task.SequenceNumber,
-		task.Priority, task.Status, task.CreatedAt, task.UpdatedAt)
+		task.Type, task.Priority, task.Status, task.Operator, task.CreatedAt, task.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("creating sub-task: %w", err)
 	}
@@ -477,6 +642,8 @@ func (s *Store) GetProjectStatus() (*ProjectStatus, error) {
 			status.Claimed = count
 		case types.TaskStatusInProgress:
 			status.InProgress = count
+		case types.TaskStatusPaused:
+			status.Paused = count
 		case types.TaskStatusBlocked:
 			status.Blocked = count
 		case types.TaskStatusCompleted:
@@ -487,7 +654,7 @@ func (s *Store) GetProjectStatus() (*ProjectStatus, error) {
 	}
 
 	status.Total = status.Ready + status.Claimed + status.InProgress +
-		status.Blocked + status.Completed + status.Failed
+		status.Paused + status.Blocked + status.Completed + status.Failed
 
 	return status, nil
 }
@@ -532,11 +699,14 @@ func (s *Store) ClaimTaskForEpic(workerID, epicID string) (*types.Task, error) {
 			)
 			RETURNING id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 			          COALESCE(parent_id, ''), sequence_number,
-			          priority, status, attempts, max_attempts, created_at, updated_at
+			          COALESCE(type, 'other'),
+			          priority, status, attempts, max_attempts,
+			          COALESCE(operator, ''), created_at, updated_at
 		`, workerID, now, now, epicID).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
 			&task.ParentID, &task.SequenceNumber,
+			&task.Type,
 			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-			&task.CreatedAt, &task.UpdatedAt)
+			&task.Operator, &task.CreatedAt, &task.UpdatedAt)
 	} else {
 		// No epic filtering, exclude sub-tasks (they run via parent)
 		err = tx.QueryRow(`
@@ -553,11 +723,12 @@ func (s *Store) ClaimTaskForEpic(workerID, epicID string) (*types.Task, error) {
 			)
 			RETURNING id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 			          COALESCE(parent_id, ''), sequence_number,
-			          priority, status, attempts, max_attempts, created_at, updated_at
+			          priority, status, attempts, max_attempts,
+			          COALESCE(operator, ''), created_at, updated_at
 		`, workerID, now, now).Scan(&task.ID, &task.Title, &task.Description, &task.EpicID,
 			&task.ParentID, &task.SequenceNumber,
 			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-			&task.CreatedAt, &task.UpdatedAt)
+			&task.Operator, &task.CreatedAt, &task.UpdatedAt)
 	}
 
 	if err == sql.ErrNoRows {
@@ -622,20 +793,23 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 	var claimedAt sql.NullInt64
 	var epicID sql.NullString
 	var description sql.NullString
+	var operator sql.NullString
 
 	err := s.DB.QueryRow(`
 		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 		       COALESCE(parent_id, ''), sequence_number,
+		       COALESCE(type, 'other'),
 		       priority, status, attempts, max_attempts,
 		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-		       created_at, updated_at
+		       COALESCE(operator, ''), created_at, updated_at
 		FROM tasks
 		WHERE id = ?
 	`, taskID).Scan(
 		&task.ID, &task.Title, &description, &epicID,
 		&task.ParentID, &task.SequenceNumber,
+		&task.Type,
 		&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-		&claimedBy, &claimedAt,
+		&claimedBy, &claimedAt, &operator,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 
@@ -645,6 +819,7 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 
 	task.Description = description.String
 	task.EpicID = epicID.String
+	task.Operator = operator.String
 	if claimedBy.Valid {
 		task.ClaimedBy = claimedBy.String
 	}
@@ -820,9 +995,10 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 		rows, err = s.DB.Query(`
 			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 			       COALESCE(parent_id, ''), sequence_number,
+			       COALESCE(type, 'other'),
 			       priority, status, attempts, max_attempts,
 			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-			       created_at, updated_at
+			       COALESCE(operator, ''), created_at, updated_at
 			FROM tasks
 			WHERE epic_id = ?
 			ORDER BY created_at ASC
@@ -832,9 +1008,10 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 		rows, err = s.DB.Query(`
 			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 			       COALESCE(parent_id, ''), sequence_number,
+			       COALESCE(type, 'other'),
 			       priority, status, attempts, max_attempts,
 			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-			       created_at, updated_at
+			       COALESCE(operator, ''), created_at, updated_at
 			FROM tasks
 			ORDER BY created_at ASC
 		`)
@@ -853,12 +1030,14 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 		var epicID sql.NullString
 		var description sql.NullString
 		var parentID sql.NullString
+		var operator sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.Title, &description, &epicID,
 			&parentID, &task.SequenceNumber,
+			&task.Type,
 			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-			&claimedBy, &claimedAt,
+			&claimedBy, &claimedAt, &operator,
 			&task.CreatedAt, &task.UpdatedAt,
 		)
 		if err != nil {
@@ -868,6 +1047,7 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 		task.Description = description.String
 		task.EpicID = epicID.String
 		task.ParentID = parentID.String
+		task.Operator = operator.String
 		if claimedBy.Valid {
 			task.ClaimedBy = claimedBy.String
 		}
@@ -1255,9 +1435,10 @@ func (s *Store) GetSubTasks(parentID string) ([]*types.Task, error) {
 	rows, err := s.DB.Query(`
 		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
 		       COALESCE(parent_id, ''), sequence_number,
+		       COALESCE(type, 'other'),
 		       priority, status, attempts, max_attempts,
 		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-		       created_at, updated_at
+		       COALESCE(operator, ''), created_at, updated_at
 		FROM tasks
 		WHERE parent_id = ?
 		ORDER BY sequence_number ASC
@@ -1275,12 +1456,14 @@ func (s *Store) GetSubTasks(parentID string) ([]*types.Task, error) {
 		var epicID sql.NullString
 		var description sql.NullString
 		var parentID sql.NullString
+		var operator sql.NullString
 
 		err := rows.Scan(
 			&task.ID, &task.Title, &description, &epicID,
 			&parentID, &task.SequenceNumber,
+			&task.Type,
 			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
-			&claimedBy, &claimedAt,
+			&claimedBy, &claimedAt, &operator,
 			&task.CreatedAt, &task.UpdatedAt,
 		)
 		if err != nil {
@@ -1290,6 +1473,7 @@ func (s *Store) GetSubTasks(parentID string) ([]*types.Task, error) {
 		task.Description = description.String
 		task.EpicID = epicID.String
 		task.ParentID = parentID.String
+		task.Operator = operator.String
 		if claimedBy.Valid {
 			task.ClaimedBy = claimedBy.String
 		}
@@ -1345,4 +1529,508 @@ func (s *Store) HasSubTasks(taskID string) (bool, error) {
 		return false, fmt.Errorf("checking for sub-tasks: %w", err)
 	}
 	return count > 0, nil
+}
+
+// AddGuidance adds a guidance message to a task's queue
+func (s *Store) AddGuidance(taskID, message string) (*types.GuidanceMessage, error) {
+	id := generateID("guidance")
+	now := time.Now().Unix()
+
+	guidance := &types.GuidanceMessage{
+		ID:        id,
+		TaskID:    taskID,
+		Message:   message,
+		CreatedAt: now,
+		Delivered: false,
+	}
+
+	_, err := s.DB.Exec(`
+		INSERT INTO guidance_queue (id, task_id, message, created_at, delivered)
+		VALUES (?, ?, ?, ?, 0)
+	`, guidance.ID, guidance.TaskID, guidance.Message, guidance.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("adding guidance: %w", err)
+	}
+
+	return guidance, nil
+}
+
+// GetPendingGuidance retrieves undelivered guidance messages for a task
+func (s *Store) GetPendingGuidance(taskID string) ([]*types.GuidanceMessage, error) {
+	rows, err := s.DB.Query(`
+		SELECT id, task_id, message, created_at, delivered
+		FROM guidance_queue
+		WHERE task_id = ? AND delivered = 0
+		ORDER BY created_at ASC
+	`, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("querying guidance: %w", err)
+	}
+	defer rows.Close()
+
+	var messages []*types.GuidanceMessage
+	for rows.Next() {
+		var g types.GuidanceMessage
+		var delivered int
+		err := rows.Scan(&g.ID, &g.TaskID, &g.Message, &g.CreatedAt, &delivered)
+		if err != nil {
+			return nil, fmt.Errorf("scanning guidance: %w", err)
+		}
+		g.Delivered = delivered != 0
+		messages = append(messages, &g)
+	}
+
+	return messages, nil
+}
+
+// MarkGuidanceDelivered marks guidance messages as delivered
+func (s *Store) MarkGuidanceDelivered(guidanceIDs []string) error {
+	if len(guidanceIDs) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(guidanceIDs))
+	args := make([]interface{}, len(guidanceIDs))
+	for i, id := range guidanceIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+
+	query := fmt.Sprintf(`
+		UPDATE guidance_queue
+		SET delivered = 1
+		WHERE id IN (%s)
+	`, strings.Join(placeholders, ", "))
+
+	_, err := s.DB.Exec(query, args...)
+	if err != nil {
+		return fmt.Errorf("marking guidance delivered: %w", err)
+	}
+
+	return nil
+}
+
+// ClearGuidance removes all guidance messages for a task
+func (s *Store) ClearGuidance(taskID string) error {
+	_, err := s.DB.Exec(`
+		DELETE FROM guidance_queue WHERE task_id = ?
+	`, taskID)
+	if err != nil {
+		return fmt.Errorf("clearing guidance: %w", err)
+	}
+	return nil
+}
+
+// PauseTask pauses a running task, preserving its state
+func (s *Store) PauseTask(taskID string) error {
+	now := time.Now().Unix()
+
+	// Check if task is in_progress or claimed (can only pause active tasks)
+	var status string
+	err := s.DB.QueryRow(`SELECT status FROM tasks WHERE id = ?`, taskID).Scan(&status)
+	if err != nil {
+		return fmt.Errorf("getting task status: %w", err)
+	}
+
+	if status != string(types.TaskStatusInProgress) && status != string(types.TaskStatusClaimed) {
+		return fmt.Errorf("cannot pause task with status %s (only in_progress or claimed tasks can be paused)", status)
+	}
+
+	// Update status to paused
+	_, err = s.DB.Exec(`
+		UPDATE tasks
+		SET status = 'paused', updated_at = ?
+		WHERE id = ?
+	`, now, taskID)
+	if err != nil {
+		return fmt.Errorf("pausing task: %w", err)
+	}
+
+	return nil
+}
+
+// ResumeTask resumes a paused task
+func (s *Store) ResumeTask(taskID string) error {
+	now := time.Now().Unix()
+
+	// Check if task is paused
+	var status string
+	err := s.DB.QueryRow(`SELECT status FROM tasks WHERE id = ?`, taskID).Scan(&status)
+	if err != nil {
+		return fmt.Errorf("getting task status: %w", err)
+	}
+
+	if status != string(types.TaskStatusPaused) {
+		return fmt.Errorf("cannot resume task with status %s (only paused tasks can be resumed)", status)
+	}
+
+	// Reset status to ready so it can be claimed again
+	_, err = s.DB.Exec(`
+		UPDATE tasks
+		SET status = 'ready', claimed_by = NULL, claimed_at = NULL, updated_at = ?
+		WHERE id = ?
+	`, now, taskID)
+	if err != nil {
+		return fmt.Errorf("resuming task: %w", err)
+	}
+
+	return nil
+}
+
+// SessionExport represents a complete exported session
+type SessionExport struct {
+	Version    string             `json:"version"`
+	ExportedAt string             `json:"exportedAt"`
+	Repository string             `json:"repository"`
+	Tasks      []*types.Task      `json:"tasks"`
+	Epics      []*types.Epic      `json:"epics"`
+	Dependencies []types.TaskDependency `json:"dependencies"`
+	Worktrees  []*WorktreeInfo    `json:"worktrees"`
+}
+
+// ImportSession imports a session from an export
+func (s *Store) ImportSession(session *SessionExport) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Import epics
+	for _, epic := range session.Epics {
+		// Check if epic already exists
+		var exists int
+		err := tx.QueryRow(`SELECT COUNT(*) FROM epics WHERE id = ?`, epic.ID).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("checking epic existence: %w", err)
+		}
+		if exists == 0 {
+			_, err = tx.Exec(`
+				INSERT INTO epics (id, title, description, status, created_at)
+				VALUES (?, ?, ?, ?, ?)
+			`, epic.ID, epic.Title, epic.Description, epic.Status, epic.CreatedAt)
+			if err != nil {
+				return fmt.Errorf("importing epic: %w", err)
+			}
+		}
+	}
+
+	// Import tasks
+	for _, task := range session.Tasks {
+		// Check if task already exists
+		var exists int
+		err := tx.QueryRow(`SELECT COUNT(*) FROM tasks WHERE id = ?`, task.ID).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("checking task existence: %w", err)
+		}
+		if exists == 0 {
+			// Convert empty epic_id to NULL for foreign key constraint
+			var epicIDValue interface{} = task.EpicID
+			if epicIDValue == "" {
+				epicIDValue = nil
+			}
+			// Convert empty parent_id to NULL
+			var parentIDValue interface{} = task.ParentID
+			if parentIDValue == "" {
+				parentIDValue = nil
+			}
+
+			_, err = tx.Exec(`
+				INSERT INTO tasks (id, title, description, epic_id, parent_id, sequence_number,
+				                  type, priority, status, attempts, max_attempts, last_error,
+				                  claimed_by, claimed_at, operator, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`, task.ID, task.Title, task.Description, epicIDValue, parentIDValue, task.SequenceNumber,
+				task.Type, task.Priority, task.Status, task.Attempts, task.MaxAttempts, task.LastError,
+				task.ClaimedBy, task.ClaimedAt, task.Operator, task.CreatedAt, task.UpdatedAt)
+			if err != nil {
+				return fmt.Errorf("importing task: %w", err)
+			}
+		}
+	}
+
+	// Import dependencies
+	for _, dep := range session.Dependencies {
+		// Check if dependency already exists
+		var exists int
+		err := tx.QueryRow(`
+			SELECT COUNT(*) FROM task_dependencies WHERE task_id = ? AND blocked_by = ?
+		`, dep.TaskID, dep.BlockedBy).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("checking dependency existence: %w", err)
+		}
+		if exists == 0 {
+			_, err = tx.Exec(`
+				INSERT INTO task_dependencies (task_id, blocked_by)
+				VALUES (?, ?)
+			`, dep.TaskID, dep.BlockedBy)
+			if err != nil {
+				return fmt.Errorf("importing dependency: %w", err)
+			}
+		}
+	}
+
+	// Note: We don't import worktrees as they are specific to the original machine
+	// The worktrees will be created as needed when tasks are executed
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("committing import: %w", err)
+	}
+
+	return nil
+}
+
+// SessionShare represents a shareable session link
+type SessionShare struct {
+	ID          string
+	Token       string
+	SessionData string
+	CreatedBy   string
+	CreatedAt   int64
+	ExpiresAt   *int64
+	AccessCount int
+}
+
+// CreateSessionShare creates a new shareable session link
+func (s *Store) CreateSessionShare(sessionJSON, createdBy string, expiresHours int) (*SessionShare, error) {
+	id := generateID("share")
+	token := generateToken()
+
+	now := time.Now().Unix()
+	var expiresAt *int64
+	if expiresHours > 0 {
+		expiry := now + int64(expiresHours*3600)
+		expiresAt = &expiry
+	}
+
+	share := &SessionShare{
+		ID:          id,
+		Token:       token,
+		SessionData: sessionJSON,
+		CreatedBy:   createdBy,
+		CreatedAt:   now,
+		ExpiresAt:   expiresAt,
+		AccessCount: 0,
+	}
+
+	var expiresAtValue interface{} = nil
+	if expiresAt != nil {
+		expiresAtValue = *expiresAt
+	}
+
+	_, err := s.DB.Exec(`
+		INSERT INTO session_shares (id, token, session_data, created_by, created_at, expires_at, access_count)
+		VALUES (?, ?, ?, ?, ?, ?, 0)
+	`, share.ID, share.Token, share.SessionData, share.CreatedBy, share.CreatedAt, expiresAtValue)
+	if err != nil {
+		return nil, fmt.Errorf("creating session share: %w", err)
+	}
+
+	return share, nil
+}
+
+// GetSessionShareByToken retrieves a session share by its token
+func (s *Store) GetSessionShareByToken(token string) (*SessionShare, error) {
+	var share SessionShare
+	var expiresAt sql.NullInt64
+
+	err := s.DB.QueryRow(`
+		SELECT id, token, session_data, created_by, created_at, expires_at, access_count
+		FROM session_shares
+		WHERE token = ?
+	`, token).Scan(&share.ID, &share.Token, &share.SessionData, &share.CreatedBy,
+		&share.CreatedAt, &expiresAt, &share.AccessCount)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if expiresAt.Valid {
+		share.ExpiresAt = &expiresAt.Int64
+	}
+
+	// Check if expired
+	if share.ExpiresAt != nil && *share.ExpiresAt < time.Now().Unix() {
+		return nil, fmt.Errorf("session share has expired")
+	}
+
+	return &share, nil
+}
+
+// IncrementShareAccess increments the access count for a session share
+func (s *Store) IncrementShareAccess(token string) error {
+	_, err := s.DB.Exec(`
+		UPDATE session_shares
+		SET access_count = access_count + 1
+		WHERE token = ?
+	`, token)
+	if err != nil {
+		return fmt.Errorf("incrementing share access: %w", err)
+	}
+	return nil
+}
+
+// DeleteSessionShare deletes a session share by token
+func (s *Store) DeleteSessionShare(token string) error {
+	_, err := s.DB.Exec(`
+		DELETE FROM session_shares WHERE token = ?
+	`, token)
+	if err != nil {
+		return fmt.Errorf("deleting session share: %w", err)
+	}
+	return nil
+}
+
+// generateToken generates a random token for sharing
+func generateToken() string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 16)
+	for i := range b {
+		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+	}
+	return string(b)
+}
+
+// Operator represents a user/operator in the system
+type Operator struct {
+	ID         string
+	Name       string
+	APIKey     string
+	CreatedAt  int64
+	LastActive *int64
+}
+
+// CreateOperator creates a new operator with an API key
+func (s *Store) CreateOperator(name string) (*Operator, error) {
+	id := generateID("op")
+	apiKey := generateAPIKey()
+	now := time.Now().Unix()
+
+	op := &Operator{
+		ID:        id,
+		Name:      name,
+		APIKey:    apiKey,
+		CreatedAt: now,
+	}
+
+	_, err := s.DB.Exec(`
+		INSERT INTO operators (id, name, api_key, created_at)
+		VALUES (?, ?, ?, ?)
+	`, op.ID, op.Name, op.APIKey, op.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("creating operator: %w", err)
+	}
+
+	return op, nil
+}
+
+// GetOperatorByName retrieves an operator by name
+func (s *Store) GetOperatorByName(name string) (*Operator, error) {
+	var op Operator
+	var lastActive sql.NullInt64
+
+	err := s.DB.QueryRow(`
+		SELECT id, name, api_key, created_at, last_active
+		FROM operators
+		WHERE name = ?
+	`, name).Scan(&op.ID, &op.Name, &op.APIKey, &op.CreatedAt, &lastActive)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if lastActive.Valid {
+		op.LastActive = &lastActive.Int64
+	}
+
+	return &op, nil
+}
+
+// GetOperatorByAPIKey retrieves an operator by API key
+func (s *Store) GetOperatorByAPIKey(apiKey string) (*Operator, error) {
+	var op Operator
+	var lastActive sql.NullInt64
+
+	err := s.DB.QueryRow(`
+		SELECT id, name, api_key, created_at, last_active
+		FROM operators
+		WHERE api_key = ?
+	`, apiKey).Scan(&op.ID, &op.Name, &op.APIKey, &op.CreatedAt, &lastActive)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if lastActive.Valid {
+		op.LastActive = &lastActive.Int64
+	}
+
+	return &op, nil
+}
+
+// UpdateOperatorLastActive updates the last active timestamp
+func (s *Store) UpdateOperatorLastActive(name string) error {
+	now := time.Now().Unix()
+	_, err := s.DB.Exec(`
+		UPDATE operators
+		SET last_active = ?
+		WHERE name = ?
+	`, now, name)
+	if err != nil {
+		return fmt.Errorf("updating operator last active: %w", err)
+	}
+	return nil
+}
+
+// ListOperators returns all operators
+func (s *Store) ListOperators() ([]*Operator, error) {
+	rows, err := s.DB.Query(`
+		SELECT id, name, api_key, created_at, last_active
+		FROM operators
+		ORDER BY created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying operators: %w", err)
+	}
+	defer rows.Close()
+
+	var operators []*Operator
+	for rows.Next() {
+		var op Operator
+		var lastActive sql.NullInt64
+
+		err := rows.Scan(&op.ID, &op.Name, &op.APIKey, &op.CreatedAt, &lastActive)
+		if err != nil {
+			return nil, fmt.Errorf("scanning operator: %w", err)
+		}
+
+		if lastActive.Valid {
+			op.LastActive = &lastActive.Int64
+		}
+
+		operators = append(operators, &op)
+	}
+
+	return operators, nil
+}
+
+// DeleteOperator deletes an operator by name
+func (s *Store) DeleteOperator(name string) error {
+	_, err := s.DB.Exec(`
+		DELETE FROM operators WHERE name = ?
+	`, name)
+	if err != nil {
+		return fmt.Errorf("deleting operator: %w", err)
+	}
+	return nil
+}
+
+// generateAPIKey generates a random API key
+func generateAPIKey() string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 32)
+	for i := range b {
+		b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+	}
+	return "dro_" + string(b)
 }

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,6 +43,13 @@ type Config struct {
 
 	// Verbose mode for debugging
 	Verbose bool
+
+	// Worktree pool settings
+	PoolEnabled      bool
+	PoolMinSize      int
+	PoolMaxSize      int
+	PoolWarmup       time.Duration
+	PoolCleanupOnExit bool
 }
 
 // Load loads configuration from environment and defaults
@@ -60,6 +68,11 @@ func Load() (*Config, error) {
 		AgentPath:       "claude", // Will be resolved based on AgentType
 		ClaudePath:      "claude", // Deprecated but kept for backwards compatibility
 		AutoSyncBeads:   false,    // Default to off for backwards compatibility
+		PoolEnabled:     false,    // Worktree pooling disabled by default
+		PoolMinSize:     2,        // Minimum warm worktrees
+		PoolMaxSize:     10,       // Maximum pooled worktrees
+		PoolWarmup:      5 * time.Minute,
+		PoolCleanupOnExit: true,   // Clean up pooled worktrees on exit
 	}
 
 	// Environment overrides
@@ -84,6 +97,21 @@ func Load() (*Config, error) {
 		// Deprecated: DROVER_CLAUDE_PATH for backwards compatibility
 		cfg.AgentPath = v
 		cfg.ClaudePath = v
+	}
+	if v := os.Getenv("DROVER_POOL_ENABLED"); v != "" {
+		cfg.PoolEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_POOL_MIN_SIZE"); v != "" {
+		cfg.PoolMinSize = parseIntOrDefault(v, 2)
+	}
+	if v := os.Getenv("DROVER_POOL_MAX_SIZE"); v != "" {
+		cfg.PoolMaxSize = parseIntOrDefault(v, 10)
+	}
+	if v := os.Getenv("DROVER_POOL_WARMUP"); v != "" {
+		cfg.PoolWarmup = parseDurationOrDefault(v, 5*time.Minute)
+	}
+	if v := os.Getenv("DROVER_POOL_CLEANUP_ON_EXIT"); v != "" {
+		cfg.PoolCleanupOnExit = v == "true" || v == "1"
 	}
 
 	// Resolve AgentPath based on AgentType if not explicitly set
@@ -123,4 +151,75 @@ func parseDurationOrDefault(s string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+// GetOperator returns the current operator name from environment or config file
+func GetOperator() string {
+	if v := os.Getenv("DROVER_OPERATOR"); v != "" {
+		return v
+	}
+
+	// Try to read from config file
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	configFile := filepath.Join(homeDir, ".drover", "config.json")
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return ""
+	}
+
+	// Simple JSON parsing for just the operator field
+	type ConfigFile struct {
+		Operator string `json:"operator"`
+	}
+	var cfg ConfigFile
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return ""
+	}
+
+	return cfg.Operator
+}
+
+// SetOperator saves the operator name to the config file
+func SetOperator(name string) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("getting home directory: %w", err)
+	}
+
+	configDir := filepath.Join(homeDir, ".drover")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	configFile := filepath.Join(configDir, "config.json")
+
+	// Read existing config or create new
+	type ConfigFile struct {
+		Operator string `json:"operator"`
+	}
+	var cfg ConfigFile
+
+	data, err := os.ReadFile(configFile)
+	if err == nil {
+		json.Unmarshal(data, &cfg)
+	}
+
+	// Update operator
+	cfg.Operator = name
+
+	// Write back
+	data, err = json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+
+	if err := os.WriteFile(configFile, data, 0644); err != nil {
+		return fmt.Errorf("writing config file: %w", err)
+	}
+
+	return nil
 }

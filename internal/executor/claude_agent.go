@@ -147,6 +147,16 @@ func (a *ClaudeAgent) CheckInstalled() error {
 func (a *ClaudeAgent) buildPrompt(task *types.Task) string {
 	var prompt strings.Builder
 
+	// Start with human guidance if present
+	if task.ExecutionContext != nil && len(task.ExecutionContext.Guidance) > 0 {
+		prompt.WriteString("=== HUMAN GUIDANCE ===\n")
+		prompt.WriteString("The following guidance has been provided for this task:\n\n")
+		for i, msg := range task.ExecutionContext.Guidance {
+			prompt.WriteString(fmt.Sprintf("[%d] %s\n", i+1, msg.Message))
+		}
+		prompt.WriteString("======================\n\n")
+	}
+
 	prompt.WriteString(fmt.Sprintf("Task: %s\n", task.Title))
 
 	if task.Description != "" {

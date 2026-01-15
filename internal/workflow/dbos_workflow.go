@@ -160,7 +160,7 @@ func (o *DBOSOrchestrator) ExecuteAllTasks(ctx dbos.DBOSContext, tasks []TaskInp
 				Error:   err.Error(),
 			}
 			// Record failure metric
-			telemetry.RecordTaskFailed(workflowCtx, "workflow-sequential", "", "workflow_error", 0)
+			telemetry.RecordTaskFailed(workflowCtx, "workflow-sequential", "", "other", "workflow_error", 0)
 			failed++
 			// Continue with next task - DBOS will track the failure
 			continue
@@ -168,10 +168,10 @@ func (o *DBOSOrchestrator) ExecuteAllTasks(ctx dbos.DBOSContext, tasks []TaskInp
 		results[i] = result
 		if result.Success {
 			completed++
-			telemetry.RecordTaskCompleted(workflowCtx, "workflow-sequential", "", time.Since(startTime))
+			telemetry.RecordTaskCompleted(workflowCtx, "workflow-sequential", "", "other", time.Since(startTime))
 		} else {
 			failed++
-			telemetry.RecordTaskFailed(workflowCtx, "workflow-sequential", "", "task_error", result.Duration)
+			telemetry.RecordTaskFailed(workflowCtx, "workflow-sequential", "", "other", "task_error", result.Duration)
 		}
 	}
 
@@ -346,7 +346,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	log.Printf("👷 Executing task %s: %s", task.TaskID, task.Title)
 
 	// Start telemetry span for task execution
-	taskAttrs := telemetry.TaskAttrs(task.TaskID, task.Title, "running", task.Priority, 1)
+	taskAttrs := telemetry.TaskAttrs(task.TaskID, task.Title, "running", "other", task.Priority, 1)
 	if task.EpicID != "" {
 		taskAttrs = append(taskAttrs, telemetry.EpicAttrs(task.EpicID)...)
 	}
@@ -369,7 +369,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	if err != nil {
 		errMsg := fmt.Sprintf("creating worktree: %v", err)
 		telemetry.RecordError(span, err, "WorktreeCreationError", telemetry.ErrorCategoryWorktree)
-		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "worktree_error", 0)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "worktree_error", 0)
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
@@ -381,7 +381,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	if err != nil {
 		errMsg := fmt.Sprintf("agent error: %v", err)
 		telemetry.RecordError(span, err, "ClaudeExecutionError", telemetry.ErrorCategoryAgent)
-		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "agent_error", 0)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "agent_error", 0)
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
@@ -389,7 +389,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	if !claudeResult.Success {
 		errMsg := claudeResult.Error.Error()
 		telemetry.RecordError(span, claudeResult.Error, "ClaudeTaskFailed", telemetry.ErrorCategoryAgent)
-		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "agent_error", claudeResult.Duration)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "agent_error", claudeResult.Duration)
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
 		return TaskResult{
 			Success: false,
@@ -405,7 +405,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	if err != nil {
 		errMsg := fmt.Sprintf("committing: %v", err)
 		telemetry.RecordError(span, err, "CommitError", telemetry.ErrorCategoryGit)
-		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "commit_error", 0)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "commit_error", 0)
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
 		return TaskResult{
 			Success: false,
@@ -431,7 +431,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 
 	// Record task completion
 	telemetry.SetTaskStatus(span, "completed")
-	telemetry.RecordTaskCompleted(taskCtx, "dbos-workflow", "", duration)
+	telemetry.RecordTaskCompleted(taskCtx, "dbos-workflow", "", "other", duration)
 
 	return TaskResult{
 		Success:    true,

@@ -30,6 +30,7 @@ type Orchestrator struct {
 	config   *config.Config
 	store    *db.Store
 	git      *git.WorktreeManager
+	pool     *git.WorktreePool // Worktree pool for pre-warming
 	agent    executor.Agent // Agent interface for Claude/Codex/Amp
 	workers  int
 	verbose  bool // Enable verbose logging
@@ -45,6 +46,23 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 	)
 	gitMgr.SetVerbose(cfg.Verbose)
 
+	// Initialize worktree pool if enabled
+	var pool *git.WorktreePool
+	if cfg.PoolEnabled {
+		poolConfig := &git.PoolConfig{
+			MinSize:         cfg.PoolMinSize,
+			MaxSize:         cfg.PoolMaxSize,
+			WarmupTimeout:   cfg.PoolWarmup,
+			CleanupOnExit:   cfg.PoolCleanupOnExit,
+			EnableSymlinks:  true,
+			GoModCache:      true,
+		}
+		pool = git.NewWorktreePool(gitMgr, poolConfig)
+		if err := pool.Start(); err != nil {
+			return nil, fmt.Errorf("starting worktree pool: %w", err)
+		}
+	}
+
 	// Create the agent based on configuration
 	agent, err := executor.NewAgent(&executor.AgentConfig{
 		Type:    cfg.AgentType,
@@ -53,6 +71,9 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 		Verbose: cfg.Verbose,
 	})
 	if err != nil {
+		if pool != nil {
+			pool.Stop()
+		}
 		return nil, fmt.Errorf("creating agent: %w", err)
 	}
 
@@ -60,6 +81,9 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 
 	// Check agent is installed
 	if err := agent.CheckInstalled(); err != nil {
+		if pool != nil {
+			pool.Stop()
+		}
 		return nil, fmt.Errorf("checking %s: %w", cfg.AgentType, err)
 	}
 
@@ -67,6 +91,7 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 		config:     cfg,
 		store:      store,
 		git:        gitMgr,
+		pool:       pool,
 		agent:      agent,
 		workers:    cfg.Workers,
 		verbose:    cfg.Verbose,
@@ -83,6 +108,9 @@ func (o *Orchestrator) SetEpicFilter(epicID string) {
 // Run executes all tasks to completion
 func (o *Orchestrator) Run(ctx context.Context) error {
 	log.Printf("🐂 Starting Drover with %d workers", o.workers)
+	if o.pool != nil && o.pool.IsEnabled() {
+		log.Printf("🚀 Worktree pool enabled (min=%d, max=%d)", o.config.PoolMinSize, o.config.PoolMaxSize)
+	}
 	if o.epicID != "" {
 		log.Printf("🎯 Filtering to epic: %s", o.epicID)
 	}
@@ -90,6 +118,11 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	// Start workflow span for telemetry
 	_, workflowSpan := telemetry.StartWorkflowSpan(ctx, telemetry.SpanWorkflowRun, "")
 	defer workflowSpan.End()
+
+	// Ensure pool is stopped when we exit
+	if o.pool != nil {
+		defer o.pool.Stop()
+	}
 
 	// Start workers - they will claim tasks independently
 	var wg sync.WaitGroup
@@ -197,7 +230,7 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	// Start telemetry span for task execution
 	taskCtx, taskSpan := telemetry.StartTaskSpan(context.Background(),
 		telemetry.SpanTaskExecute,
-		telemetry.TaskAttrs(task.ID, task.Title, "in_progress", task.Priority, task.Attempts)...)
+		telemetry.TaskAttrs(task.ID, task.Title, "in_progress", string(task.Type), task.Priority, task.Attempts)...)
 
 	workerIDStr := fmt.Sprintf("worker-%d", workerID)
 	telemetry.RecordTaskClaimed(taskCtx, workerIDStr, o.epicID)
@@ -224,18 +257,73 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 		}
 	}()
 
-	// Create worktree
-	worktreePath, err := o.git.Create(task)
-	if err != nil {
-		log.Printf("❌ Task %s failed: creating worktree: %v", task.ID, err)
-		telemetry.RecordError(taskSpan, err, "WorktreeCreationFailed", "git")
-		telemetry.SetTaskStatus(taskSpan, "failed")
-		if o.handleTaskFailure(task.ID, err.Error()) {
-			taskCompleted = true // Task set to ready for retry
+	// Create worktree (use pool if enabled)
+	var worktreePath string
+	var worktreeCleanupNeeded = true
+	if o.pool != nil && o.pool.IsEnabled() {
+		worktreePath, err = o.pool.Acquire(task.ID)
+		if err != nil {
+			log.Printf("❌ Task %s failed: acquiring worktree from pool: %v", task.ID, err)
+			telemetry.RecordError(taskSpan, err, "WorktreeAcquireFailed", "pool")
+			telemetry.SetTaskStatus(taskSpan, "failed")
+			if o.handleTaskFailure(task.ID, err.Error()) {
+				taskCompleted = true // Task set to ready for retry
+			}
+			return
 		}
-		return
+		defer func() {
+			if worktreeCleanupNeeded {
+				o.pool.Release(task.ID, false) // Don't retain worktree after task completion
+			}
+		}()
+	} else {
+		// Check if worktree already exists (from a paused task)
+		existingPath, err := o.git.GetWorktreePath(task.ID)
+		if err == nil && existingPath != "" {
+			worktreePath = existingPath
+			log.Printf("♻️  Reusing existing worktree for task %s at %s", task.ID, worktreePath)
+		} else {
+			worktreePath, err = o.git.Create(task)
+			if err != nil {
+				log.Printf("❌ Task %s failed: creating worktree: %v", task.ID, err)
+				telemetry.RecordError(taskSpan, err, "WorktreeCreationFailed", "git")
+				telemetry.SetTaskStatus(taskSpan, "failed")
+				if o.handleTaskFailure(task.ID, err.Error()) {
+					taskCompleted = true // Task set to ready for retry
+				}
+				return
+			}
+		}
+		defer func() {
+			if worktreeCleanupNeeded {
+				o.git.Remove(task.ID)
+			}
+		}()
 	}
-	defer o.git.Remove(task.ID)
+
+	// Fetch pending guidance and set on task execution context
+	guidance, err := o.store.GetPendingGuidance(task.ID)
+	if err != nil {
+		log.Printf("Error fetching guidance: %v", err)
+		// Continue without guidance rather than failing
+	}
+	if len(guidance) > 0 {
+		log.Printf("💡 Found %d pending guidance messages for task %s", len(guidance), task.ID)
+		task.ExecutionContext = &types.TaskExecutionContext{
+			Guidance: guidance,
+		}
+		// Track guidance IDs for marking as delivered later
+		var guidanceIDs []string
+		for _, g := range guidance {
+			guidanceIDs = append(guidanceIDs, g.ID)
+		}
+		defer func() {
+			// Mark guidance as delivered after execution completes
+			if err := o.store.MarkGuidanceDelivered(guidanceIDs); err != nil {
+				log.Printf("Error marking guidance delivered: %v", err)
+			}
+		}()
+	}
 
 	// Execute Claude Code and capture the result
 	result := o.agent.ExecuteWithContext(taskCtx, worktreePath, task, taskSpan)
@@ -300,7 +388,7 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 
 	// Record task completion telemetry
 	telemetry.SetTaskStatus(taskSpan, "completed")
-	telemetry.RecordTaskCompleted(taskCtx, workerIDStr, o.epicID, duration)
+	telemetry.RecordTaskCompleted(taskCtx, workerIDStr, o.epicID, string(task.Type), duration)
 }
 
 // executeSubTasks executes all sub-tasks of a parent task
@@ -336,26 +424,64 @@ func (o *Orchestrator) executeSubTasks(workerID int, parentTask *types.Task) boo
 			return false
 		}
 
-		// Create worktree for sub-task
-		worktreePath, err := o.git.Create(subTask)
-		if err != nil {
-			log.Printf("❌ Sub-task %s failed: creating worktree: %v", subTask.ID, err)
-			o.handleTaskFailure(subTask.ID, err.Error())
-			return false
+		// Create worktree for sub-task (use pool if enabled)
+		var worktreePath string
+		if o.pool != nil && o.pool.IsEnabled() {
+			worktreePath, err = o.pool.Acquire(subTask.ID)
+			if err != nil {
+				log.Printf("❌ Sub-task %s failed: acquiring worktree from pool: %v", subTask.ID, err)
+				o.handleTaskFailure(subTask.ID, err.Error())
+				return false
+			}
+		} else {
+			worktreePath, err = o.git.Create(subTask)
+			if err != nil {
+				log.Printf("❌ Sub-task %s failed: creating worktree: %v", subTask.ID, err)
+				o.handleTaskFailure(subTask.ID, err.Error())
+				return false
+			}
+		}
+
+		// Fetch pending guidance for sub-task
+		guidance, gErr := o.store.GetPendingGuidance(subTask.ID)
+		if gErr != nil {
+			log.Printf("Error fetching guidance: %v", gErr)
+			// Continue without guidance rather than failing
+		}
+		if len(guidance) > 0 {
+			log.Printf("💡 Found %d pending guidance messages for sub-task %s", len(guidance), subTask.ID)
+			subTask.ExecutionContext = &types.TaskExecutionContext{
+				Guidance: guidance,
+			}
+			// Track guidance IDs for marking as delivered later
+			var guidanceIDs []string
+			for _, g := range guidance {
+				guidanceIDs = append(guidanceIDs, g.ID)
+			}
+			defer func() {
+				// Mark guidance as delivered after execution completes
+				if err := o.store.MarkGuidanceDelivered(guidanceIDs); err != nil {
+					log.Printf("Error marking guidance delivered: %v", err)
+				}
+			}()
 		}
 
 		// Execute sub-task
 		start := time.Now()
 		taskCtx, taskSpan := telemetry.StartTaskSpan(context.Background(),
 			telemetry.SpanTaskExecute,
-			telemetry.TaskAttrs(subTask.ID, subTask.Title, "in_progress", subTask.Priority, subTask.Attempts)...)
+			telemetry.TaskAttrs(subTask.ID, subTask.Title, "in_progress", string(subTask.Type), subTask.Priority, subTask.Attempts)...)
 		telemetry.RecordTaskClaimed(taskCtx, fmt.Sprintf("worker-%d", workerID), parentTask.EpicID)
 		defer taskSpan.End()
 
 		result := o.agent.ExecuteWithContext(taskCtx, worktreePath, subTask, taskSpan)
 
 		// Clean up worktree
-		o.git.Remove(subTask.ID)
+		if o.pool != nil && o.pool.IsEnabled() {
+			o.pool.Release(subTask.ID, false)
+		} else {
+			o.git.Remove(subTask.ID)
+		}
 
 		if !result.Success {
 			log.Printf("❌ Sub-task %s failed: %v", subTask.ID, result.Error)
@@ -392,7 +518,7 @@ func (o *Orchestrator) executeSubTasks(workerID int, parentTask *types.Task) boo
 
 		// Record sub-task completion telemetry
 		telemetry.SetTaskStatus(taskSpan, "completed")
-		telemetry.RecordTaskCompleted(taskCtx, fmt.Sprintf("worker-%d", workerID), parentTask.EpicID, duration)
+		telemetry.RecordTaskCompleted(taskCtx, fmt.Sprintf("worker-%d", workerID), parentTask.EpicID, string(subTask.Type), duration)
 	}
 
 	log.Printf("✅ All %d sub-tasks completed for %s", len(subTasks), parentTask.ID)
@@ -440,9 +566,9 @@ func (o *Orchestrator) printProgress(status *db.ProjectStatus) {
 	}
 
 	progress := float64(status.Completed) / float64(status.Total) * 100
-	log.Printf("📊 Progress: %d/%d tasks (%.1f%%) | Ready: %d | In Progress: %d | Blocked: %d | Failed: %d",
+	log.Printf("📊 Progress: %d/%d tasks (%.1f%%) | Ready: %d | In Progress: %d | Paused: %d | Blocked: %d | Failed: %d",
 		status.Completed, status.Total, progress,
-		status.Ready, status.InProgress, status.Blocked, status.Failed)
+		status.Ready, status.InProgress, status.Paused, status.Blocked, status.Failed)
 }
 
 // printFinalStatus prints final run results

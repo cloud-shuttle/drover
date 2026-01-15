@@ -18,6 +18,7 @@ const (
 	KeyTaskID         = "drover.task.id"
 	KeyTaskTitle      = "drover.task.title"
 	KeyTaskState      = "drover.task.state"
+	KeyTaskType       = "drover.task.type"
 	KeyTaskPriority   = "drover.task.priority"
 	KeyTaskAttempt    = "drover.task.attempt"
 	KeyEpicID         = "drover.epic.id"
@@ -68,11 +69,12 @@ const (
 )
 
 // TaskAttrs returns a set of attributes for a task
-func TaskAttrs(id, title, state string, priority, attempt int) []attribute.KeyValue {
+func TaskAttrs(id, title, state, taskType string, priority, attempt int) []attribute.KeyValue {
 	return []attribute.KeyValue{
 		attribute.String(KeyTaskID, id),
 		attribute.String(KeyTaskTitle, title),
 		attribute.String(KeyTaskState, state),
+		attribute.String(KeyTaskType, taskType),
 		attribute.Int(KeyTaskPriority, priority),
 		attribute.Int(KeyTaskAttempt, attempt),
 	}

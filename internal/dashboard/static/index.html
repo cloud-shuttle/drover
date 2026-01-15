@@ -108,6 +108,20 @@
     </main>
   </div>
 
+  <!-- Worktree File Browser Modal -->
+  <div id="worktree-modal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Worktree Files</h3>
+        <button class="modal-close" onclick="closeWorktreeModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="worktree-breadcrumb" class="worktree-breadcrumb"></div>
+        <div id="worktree-files" class="worktree-files"></div>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
