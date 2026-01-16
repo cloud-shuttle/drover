@@ -3,7 +3,6 @@ package analytics
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -137,6 +136,9 @@ func TestStartAndEndTask(t *testing.T) {
 	}
 
 	// End the task
+	// Note: Duration is in seconds, so very fast tasks may have 0 duration
+	// Adding a small sleep to ensure at least 1 second duration
+	time.Sleep(1100 * time.Millisecond)
 	m.EndTask(taskID, "success", "")
 
 	// Verify task is completed
