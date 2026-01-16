@@ -22,18 +22,18 @@ type Config struct {
 	MaxTaskAttempts int
 
 	// Retry settings
-	ClaimTimeout  time.Duration
-	StallTimeout  time.Duration
-	PollInterval  time.Duration
-	AutoUnblock   bool
+	ClaimTimeout time.Duration
+	StallTimeout time.Duration
+	PollInterval time.Duration
+	AutoUnblock  bool
 
 	// Git settings
 	WorktreeDir string
 
 	// Agent settings
-	AgentType  string  // "claude", "codex", or "amp"
-	AgentPath  string  // path to agent binary
-	ClaudePath string  // deprecated: use AgentPath instead
+	AgentType  string // "claude", "codex", "copilot", "amp" or "opencode"
+	AgentPath  string // path to agent binary
+	ClaudePath string // deprecated: use AgentPath instead
 
 	// Beads sync settings
 	AutoSyncBeads bool
@@ -45,34 +45,34 @@ type Config struct {
 	Verbose bool
 
 	// Worktree pool settings
-	PoolEnabled      bool
-	PoolMinSize      int
-	PoolMaxSize      int
-	PoolWarmup       time.Duration
+	PoolEnabled       bool
+	PoolMinSize       int
+	PoolMaxSize       int
+	PoolWarmup        time.Duration
 	PoolCleanupOnExit bool
 }
 
 // Load loads configuration from environment and defaults
 func Load() (*Config, error) {
 	cfg := &Config{
-		DatabaseURL:     defaultDatabaseURL(),
-		Workers:         3,
-		TaskTimeout:     60 * time.Minute,
-		MaxTaskAttempts: 3,
-		ClaimTimeout:    5 * time.Minute,
-		StallTimeout:    5 * time.Minute,
-		PollInterval:    2 * time.Second,
-		AutoUnblock:     true,
-		WorktreeDir:     ".drover/worktrees",
-		AgentType:       "claude", // Default to Claude for backwards compatibility
-		AgentPath:       "claude", // Will be resolved based on AgentType
-		ClaudePath:      "claude", // Deprecated but kept for backwards compatibility
-		AutoSyncBeads:   false,    // Default to off for backwards compatibility
-		PoolEnabled:     false,    // Worktree pooling disabled by default
-		PoolMinSize:     2,        // Minimum warm worktrees
-		PoolMaxSize:     10,       // Maximum pooled worktrees
-		PoolWarmup:      5 * time.Minute,
-		PoolCleanupOnExit: true,   // Clean up pooled worktrees on exit
+		DatabaseURL:       defaultDatabaseURL(),
+		Workers:           3,
+		TaskTimeout:       60 * time.Minute,
+		MaxTaskAttempts:   3,
+		ClaimTimeout:      5 * time.Minute,
+		StallTimeout:      5 * time.Minute,
+		PollInterval:      2 * time.Second,
+		AutoUnblock:       true,
+		WorktreeDir:       ".drover/worktrees",
+		AgentType:         "claude", // Default to Claude for backwards compatibility
+		AgentPath:         "claude", // Will be resolved based on AgentType
+		ClaudePath:        "claude", // Deprecated but kept for backwards compatibility
+		AutoSyncBeads:     false,    // Default to off for backwards compatibility
+		PoolEnabled:       false,    // Worktree pooling disabled by default
+		PoolMinSize:       2,        // Minimum warm worktrees
+		PoolMaxSize:       10,       // Maximum pooled worktrees
+		PoolWarmup:        5 * time.Minute,
+		PoolCleanupOnExit: true, // Clean up pooled worktrees on exit
 	}
 
 	// Environment overrides
