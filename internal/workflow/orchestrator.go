@@ -27,15 +27,15 @@ import (
 
 // Orchestrator manages the main execution loop
 type Orchestrator struct {
-	config   *config.Config
-	store    *db.Store
-	git      *git.WorktreeManager
-	pool     *git.WorktreePool // Worktree pool for pre-warming
-	agent    executor.Agent // Agent interface for Claude/Codex/Amp
-	workers  int
-	verbose  bool // Enable verbose logging
+	config     *config.Config
+	store      *db.Store
+	git        *git.WorktreeManager
+	pool       *git.WorktreePool // Worktree pool for pre-warming
+	agent      executor.Agent    // Agent interface for Claude/Codex/Amp
+	workers    int
+	verbose    bool   // Enable verbose logging
 	projectDir string // Project directory for beads sync
-	epicID   string // Optional epic filter for task execution
+	epicID     string // Optional epic filter for task execution
 }
 
 // NewOrchestrator creates a new workflow orchestrator
@@ -50,12 +50,12 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 	var pool *git.WorktreePool
 	if cfg.PoolEnabled {
 		poolConfig := &git.PoolConfig{
-			MinSize:         cfg.PoolMinSize,
-			MaxSize:         cfg.PoolMaxSize,
-			WarmupTimeout:   cfg.PoolWarmup,
-			CleanupOnExit:   cfg.PoolCleanupOnExit,
-			EnableSymlinks:  true,
-			GoModCache:      true,
+			MinSize:        cfg.PoolMinSize,
+			MaxSize:        cfg.PoolMaxSize,
+			WarmupTimeout:  cfg.PoolWarmup,
+			CleanupOnExit:  cfg.PoolCleanupOnExit,
+			EnableSymlinks: true,
+			GoModCache:     true,
 		}
 		pool = git.NewWorktreePool(gitMgr, poolConfig)
 		if err := pool.Start(); err != nil {

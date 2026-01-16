@@ -126,9 +126,9 @@ func (a *ClaudeAgent) ExecuteWithContext(ctx context.Context, worktreePath strin
 	telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeClaudeCode, duration)
 
 	return &ExecutionResult{
-		Success: true,
-		Output:  fullOutput,
-		Error:   nil,
+		Success:  true,
+		Output:   fullOutput,
+		Error:    nil,
 		Duration: duration,
 	}
 }

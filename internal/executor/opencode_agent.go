@@ -125,9 +125,9 @@ func (a *OpenCodeAgent) ExecuteWithContext(ctx context.Context, worktreePath str
 	telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeOpenCode, duration)
 
 	return &ExecutionResult{
-		Success: true,
-		Output:  fullOutput,
-		Error:   nil,
+		Success:  true,
+		Output:   fullOutput,
+		Error:    nil,
 		Duration: duration,
 	}
 }

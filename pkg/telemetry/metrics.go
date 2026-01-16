@@ -16,42 +16,42 @@ var meter = otel.Meter("drover")
 // Counter instruments
 var (
 	// Task counters
-	tasksClaimedCounter    metric.Int64Counter
-	tasksCompletedCounter  metric.Int64Counter
-	tasksFailedCounter     metric.Int64Counter
-	tasksRetriedCounter    metric.Int64Counter
+	tasksClaimedCounter   metric.Int64Counter
+	tasksCompletedCounter metric.Int64Counter
+	tasksFailedCounter    metric.Int64Counter
+	tasksRetriedCounter   metric.Int64Counter
 
 	// Blocker counters
-	blockersDetectedCounter   metric.Int64Counter
-	fixTasksCreatedCounter    metric.Int64Counter
+	blockersDetectedCounter metric.Int64Counter
+	fixTasksCreatedCounter  metric.Int64Counter
 
 	// Agent counters
-	agentPromptsCounter       metric.Int64Counter
-	agentToolCallsCounter     metric.Int64Counter
-	agentErrorsCounter        metric.Int64Counter
+	agentPromptsCounter   metric.Int64Counter
+	agentToolCallsCounter metric.Int64Counter
+	agentErrorsCounter    metric.Int64Counter
 
 	// Sync counters
-	syncCompletedCounter  metric.Int64Counter
-	syncFailedCounter     metric.Int64Counter
-	syncBytesCounter      metric.Int64Counter
+	syncCompletedCounter metric.Int64Counter
+	syncFailedCounter    metric.Int64Counter
+	syncBytesCounter     metric.Int64Counter
 )
 
 // Gauge instruments
 var (
-	tasksActiveGauge        metric.Int64ObservableGauge
-	workersActiveGauge      metric.Int64ObservableGauge
-	tasksPendingGauge       metric.Int64ObservableGauge
-	worktreesActiveGauge    metric.Int64ObservableGauge
-	worktreesSyncingGauge   metric.Int64ObservableGauge
+	tasksActiveGauge      metric.Int64ObservableGauge
+	workersActiveGauge    metric.Int64ObservableGauge
+	tasksPendingGauge     metric.Int64ObservableGauge
+	worktreesActiveGauge  metric.Int64ObservableGauge
+	worktreesSyncingGauge metric.Int64ObservableGauge
 )
 
 // Histogram instruments
 var (
-	taskDurationHistogram       metric.Float64Histogram
-	agentDurationHistogram      metric.Float64Histogram
-	claimLatencyHistogram       metric.Float64Histogram
-	worktreeSetupHistogram      metric.Float64Histogram
-	syncDurationHistogram       metric.Float64Histogram
+	taskDurationHistogram  metric.Float64Histogram
+	agentDurationHistogram metric.Float64Histogram
+	claimLatencyHistogram  metric.Float64Histogram
+	worktreeSetupHistogram metric.Float64Histogram
+	syncDurationHistogram  metric.Float64Histogram
 )
 
 // initMetrics initializes all metric instruments

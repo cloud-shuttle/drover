@@ -134,9 +134,9 @@ func (a *CodexAgent) ExecuteWithContext(ctx context.Context, worktreePath string
 	telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeCodex, duration)
 
 	return &ExecutionResult{
-		Success: true,
-		Output:  fullOutput,
-		Error:   nil,
+		Success:  true,
+		Output:   fullOutput,
+		Error:    nil,
 		Duration: duration,
 	}
 }

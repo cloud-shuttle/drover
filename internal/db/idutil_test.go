@@ -7,12 +7,12 @@ import (
 
 func TestParseHierarchicalID(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		wantBase    string
-		wantLevel1  int
-		wantLevel2  int
-		wantErr     bool
+		name       string
+		input      string
+		wantBase   string
+		wantLevel1 int
+		wantLevel2 int
+		wantErr    bool
 	}{
 		{"base task", "task-123", "task-123", 0, 0, false},
 		{"first level sub-task", "task-123.1", "task-123", 1, 0, false},

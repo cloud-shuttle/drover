@@ -333,17 +333,17 @@ func (wm *WorktreeManager) Path(taskID string) string {
 // Directories to clean up aggressively (build artifacts and dependencies)
 // These can consume massive amounts of disk space
 var aggressiveCleanupDirs = []string{
-	"target",           // Rust/Cargo build artifacts
-	"node_modules",     // Node.js dependencies
-	"vendor",           // PHP/Go vendor directories
-	"__pycache__",      // Python cache
-	".venv",            // Python virtual environments
-	"venv",             // Python virtual environments
-	"dist",             // Various build outputs
-	"build",            // Various build outputs
-	".next",            // Next.js cache
-	".nuxt",            // Nuxt.js cache
-	"coverage",         // Code coverage reports
+	"target",       // Rust/Cargo build artifacts
+	"node_modules", // Node.js dependencies
+	"vendor",       // PHP/Go vendor directories
+	"__pycache__",  // Python cache
+	".venv",        // Python virtual environments
+	"venv",         // Python virtual environments
+	"dist",         // Various build outputs
+	"build",        // Various build outputs
+	".next",        // Next.js cache
+	".nuxt",        // Nuxt.js cache
+	"coverage",     // Code coverage reports
 }
 
 // RemoveAggressive removes a worktree and aggressively cleans up build artifacts

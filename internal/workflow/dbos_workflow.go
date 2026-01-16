@@ -62,15 +62,15 @@ type QueueStats struct {
 
 // DBOSOrchestrator manages workflow execution using DBOS
 type DBOSOrchestrator struct {
-	config         *config.Config
-	git            *git.WorktreeManager
-	agent          executor.Agent // Agent interface for Claude/Codex/Amp
-	dbosCtx        dbos.DBOSContext
-	queue          dbos.WorkflowQueue
-	store          *db.Store // SQLite store for worktree tracking
-	verbose        bool
-	dependencyMap  map[string][]string // taskID -> list of dependent task IDs
-	dependencyMu   sync.RWMutex
+	config        *config.Config
+	git           *git.WorktreeManager
+	agent         executor.Agent // Agent interface for Claude/Codex/Amp
+	dbosCtx       dbos.DBOSContext
+	queue         dbos.WorkflowQueue
+	store         *db.Store // SQLite store for worktree tracking
+	verbose       bool
+	dependencyMap map[string][]string // taskID -> list of dependent task IDs
+	dependencyMu  sync.RWMutex
 }
 
 // NewDBOSOrchestrator creates a new DBOS-based orchestrator
