@@ -36,31 +36,31 @@ type EpicWithCount struct {
 
 // TaskWithEpic represents a task with epic information
 type TaskWithEpic struct {
-	ID             string  `json:"id"`
-	Title          string  `json:"title"`
-	Description    string  `json:"description"`
-	EpicID         string  `json:"epic_id"`
-	EpicTitle      string  `json:"epic_title"`
-	ParentID       string  `json:"parent_id"`
-	SequenceNumber int     `json:"sequence_number"`
-	Priority       int     `json:"priority"`
-	Status         string  `json:"status"`
-	Attempts       int     `json:"attempts"`
-	MaxAttempts    int     `json:"max_attempts"`
-	LastError      string  `json:"last_error"`
-	ClaimedBy      string  `json:"claimed_by"`
-	ClaimedAt      int64   `json:"claimed_at"`
-	Operator       string  `json:"operator"`
-	CreatedAt      int64   `json:"created_at"`
-	UpdatedAt      int64   `json:"updated_at"`
+	ID             string `json:"id"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	EpicID         string `json:"epic_id"`
+	EpicTitle      string `json:"epic_title"`
+	ParentID       string `json:"parent_id"`
+	SequenceNumber int    `json:"sequence_number"`
+	Priority       int    `json:"priority"`
+	Status         string `json:"status"`
+	Attempts       int    `json:"attempts"`
+	MaxAttempts    int    `json:"max_attempts"`
+	LastError      string `json:"last_error"`
+	ClaimedBy      string `json:"claimed_by"`
+	ClaimedAt      int64  `json:"claimed_at"`
+	Operator       string `json:"operator"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
 }
 
 // WorkerInfo represents active worker information
 type WorkerInfo struct {
-	WorkerID  string `json:"worker_id"`
-	TaskID    string `json:"task_id"`
-	Title     string `json:"title"`
-	Duration  int64  `json:"duration"` // Seconds since claim
+	WorkerID string `json:"worker_id"`
+	TaskID   string `json:"task_id"`
+	Title    string `json:"title"`
+	Duration int64  `json:"duration"` // Seconds since claim
 }
 
 // GraphEdge represents a dependency edge
@@ -405,10 +405,10 @@ func (s *Server) getWorktreeFiles(taskID, path string) ([]WorktreeFile, error) {
 		}
 
 		files = append(files, WorktreeFile{
-			Name: entry.Name(),
-			Path: filepath.Join(path, entry.Name()),
-			Type: fileType,
-			Size: info.Size(),
+			Name:     entry.Name(),
+			Path:     filepath.Join(path, entry.Name()),
+			Type:     fileType,
+			Size:     info.Size(),
 			Modified: info.ModTime().Unix(),
 		})
 	}

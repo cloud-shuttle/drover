@@ -53,32 +53,32 @@ func (s WorktreeState) String() string {
 
 // PooledWorktree represents a worktree in the pool
 type PooledWorktree struct {
-	ID                string        // Unique identifier (pool index or timestamp)
-	TaskID            string        // Currently assigned task (empty if not in use)
-	Path              string        // File system path
-	Branch            string        // Git branch name
-	State             WorktreeState // Current state
-	CreatedAt         time.Time     // When the worktree was created
-	WarmedAt          time.Time     // When the worktree became warm
-	AssignedAt        time.Time     // When the worktree was assigned to a task
-	mu                sync.Mutex    // Protects state transitions
+	ID         string        // Unique identifier (pool index or timestamp)
+	TaskID     string        // Currently assigned task (empty if not in use)
+	Path       string        // File system path
+	Branch     string        // Git branch name
+	State      WorktreeState // Current state
+	CreatedAt  time.Time     // When the worktree was created
+	WarmedAt   time.Time     // When the worktree became warm
+	AssignedAt time.Time     // When the worktree was assigned to a task
+	mu         sync.Mutex    // Protects state transitions
 	// Sync state for async git fetch
-	LastFetchAt       time.Time     // When the last fetch completed
-	LastFetchStatus   string        // Status of last fetch ("", "ok", "error")
-	LastFetchError    string        // Error message if fetch failed
-	IsReadOnly        bool          // True when sync is in progress
+	LastFetchAt     time.Time // When the last fetch completed
+	LastFetchStatus string    // Status of last fetch ("", "ok", "error")
+	LastFetchError  string    // Error message if fetch failed
+	IsReadOnly      bool      // True when sync is in progress
 }
 
 // PoolConfig holds configuration for the worktree pool
 type PoolConfig struct {
-	MinSize         int           // Minimum number of warm worktrees to maintain
-	MaxSize         int           // Maximum number of worktrees in the pool
-	ReplenishThreshold int        // Create new worktree when warm count falls below this
-	WarmupTimeout   time.Duration // Max time to wait for worktree warmup
-	CleanupOnExit   bool          // Whether to clean up pooled worktrees on exit
-	EnableSymlinks  bool          // Enable shared node_modules via symlinks
-	GoModCache      bool          // Enable Go module cache sharing
-	CargoTargetDir  bool          // Enable shared Cargo target directory for Rust projects
+	MinSize            int           // Minimum number of warm worktrees to maintain
+	MaxSize            int           // Maximum number of worktrees in the pool
+	ReplenishThreshold int           // Create new worktree when warm count falls below this
+	WarmupTimeout      time.Duration // Max time to wait for worktree warmup
+	CleanupOnExit      bool          // Whether to clean up pooled worktrees on exit
+	EnableSymlinks     bool          // Enable shared node_modules via symlinks
+	GoModCache         bool          // Enable Go module cache sharing
+	CargoTargetDir     bool          // Enable shared Cargo target directory for Rust projects
 }
 
 // DefaultPoolConfig returns sensible defaults for the pool
@@ -100,7 +100,7 @@ type WorktreePool struct {
 	manager    *WorktreeManager
 	config     *PoolConfig
 	worktrees  map[string]*PooledWorktree // worktree ID -> PooledWorktree
-	mu         sync.RWMutex              // Protects worktrees map
+	mu         sync.RWMutex               // Protects worktrees map
 	ctx        context.Context
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
@@ -109,9 +109,9 @@ type WorktreePool struct {
 	shutdownCh chan struct{}
 
 	// Dependency cache paths
-	sharedNodeModules  string // Path to shared node_modules
-	sharedGoModCache   string // Path to Go module cache (GOMODCACHE)
-	sharedCargoTarget  string // Path to shared Cargo target directory
+	sharedNodeModules string // Path to shared node_modules
+	sharedGoModCache  string // Path to Go module cache (GOMODCACHE)
+	sharedCargoTarget string // Path to shared Cargo target directory
 }
 
 // NewWorktreePool creates a new worktree pool
@@ -297,14 +297,14 @@ func (p *WorktreePool) Stats() PoolStats {
 	defer p.mu.RUnlock()
 
 	return PoolStats{
-		Total:      len(p.worktrees),
-		Cold:       p.countByState(StateCold),
-		Warming:    p.countByState(StateWarming),
-		Warm:       p.countByState(StateWarm),
-		InUse:      p.countByState(StateInUse),
-		Draining:   p.countByState(StateDraining),
-		MinSize:    p.config.MinSize,
-		MaxSize:    p.config.MaxSize,
+		Total:    len(p.worktrees),
+		Cold:     p.countByState(StateCold),
+		Warming:  p.countByState(StateWarming),
+		Warm:     p.countByState(StateWarm),
+		InUse:    p.countByState(StateInUse),
+		Draining: p.countByState(StateDraining),
+		MinSize:  p.config.MinSize,
+		MaxSize:  p.config.MaxSize,
 	}
 }
 
@@ -322,10 +322,10 @@ type PoolStats struct {
 
 // FetchSyncResult represents the result of an async git fetch operation
 type FetchSyncResult struct {
-	WorktreeID    string    // ID of the worktree that was fetched
-	CompletedAt   time.Time // When the fetch completed
-	Success       bool      // True if fetch succeeded
-	Error         string    // Error message if fetch failed
+	WorktreeID     string    // ID of the worktree that was fetched
+	CompletedAt    time.Time // When the fetch completed
+	Success        bool      // True if fetch succeeded
+	Error          string    // Error message if fetch failed
 	CommitsFetched int       // Number of commits fetched (if available)
 }
 
@@ -373,7 +373,7 @@ func (p *WorktreePool) FetchWorktree(worktreeID string) FetchSyncResult {
 
 	if !exists {
 		return FetchSyncResult{
-			WorktreeID: worktreeID,
+			WorktreeID:  worktreeID,
 			CompletedAt: time.Now(),
 			Success:     false,
 			Error:       "worktree not found",
@@ -578,13 +578,13 @@ func (p *WorktreePool) createAndWarmWorktree(taskID string) error {
 	// Create pooled worktree entry
 	p.mu.Lock()
 	wt := &PooledWorktree{
-		ID:        taskID,
-		TaskID:    taskID,
-		Path:      worktreePath,
-		Branch:    branchName,
-		State:     StateInUse, // Already assigned to the task
-		CreatedAt: time.Now(),
-		WarmedAt:  time.Now(),
+		ID:         taskID,
+		TaskID:     taskID,
+		Path:       worktreePath,
+		Branch:     branchName,
+		State:      StateInUse, // Already assigned to the task
+		CreatedAt:  time.Now(),
+		WarmedAt:   time.Now(),
 		AssignedAt: time.Now(),
 	}
 	p.worktrees[wt.ID] = wt

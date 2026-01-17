@@ -24,18 +24,18 @@ type Config struct {
 	MaxTaskAttempts int
 
 	// Retry settings
-	ClaimTimeout  time.Duration
-	StallTimeout  time.Duration
-	PollInterval  time.Duration
-	AutoUnblock   bool
+	ClaimTimeout time.Duration
+	StallTimeout time.Duration
+	PollInterval time.Duration
+	AutoUnblock  bool
 
 	// Git settings
 	WorktreeDir string
 
 	// Agent settings
-	AgentType  string  // "claude", "codex", or "amp"
-	AgentPath  string  // path to agent binary
-	ClaudePath string  // deprecated: use AgentPath instead
+	AgentType  string // "claude", "codex", "copilot", "amp" or "opencode"
+	AgentPath  string // path to agent binary
+	ClaudePath string // deprecated: use AgentPath instead
 
 	// Worker mode settings (for planning/building separation)
 	WorkerMode    modes.WorkerMode // "combined", "planning", or "building"
@@ -51,10 +51,10 @@ type Config struct {
 	Verbose bool
 
 	// Worktree pool settings
-	PoolEnabled      bool
-	PoolMinSize      int
-	PoolMaxSize      int
-	PoolWarmup       time.Duration
+	PoolEnabled       bool
+	PoolMinSize       int
+	PoolMaxSize       int
+	PoolWarmup        time.Duration
 	PoolCleanupOnExit bool
 
 	// Modes configuration (for planning/building separation)
@@ -159,6 +159,8 @@ func Load() (*Config, error) {
 		switch cfg.AgentType {
 		case "codex":
 			cfg.AgentPath = "codex"
+		case "copilot":
+			cfg.AgentPath = "copilot"
 		case "amp":
 			cfg.AgentPath = "amp"
 		}

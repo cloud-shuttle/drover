@@ -1250,15 +1250,15 @@ func (s *Store) ListAllDependencies() ([]types.TaskDependency, error) {
 
 // WorktreeInfo represents a worktree with its metadata
 type WorktreeInfo struct {
-	TaskID      string
-	Path        string
-	Branch      string
-	CreatedAt   int64
-	LastUsedAt  int64
-	Status      string
-	DiskSize    int64
-	TaskStatus  string
-	TaskTitle   string
+	TaskID     string
+	Path       string
+	Branch     string
+	CreatedAt  int64
+	LastUsedAt int64
+	Status     string
+	DiskSize   int64
+	TaskStatus string
+	TaskTitle  string
 }
 
 // CreateWorktree records a new worktree in the database
@@ -1786,13 +1786,13 @@ func (s *Store) ResumeTask(taskID string) error {
 
 // SessionExport represents a complete exported session
 type SessionExport struct {
-	Version    string             `json:"version"`
-	ExportedAt string             `json:"exportedAt"`
-	Repository string             `json:"repository"`
-	Tasks      []*types.Task      `json:"tasks"`
-	Epics      []*types.Epic      `json:"epics"`
+	Version      string                 `json:"version"`
+	ExportedAt   string                 `json:"exportedAt"`
+	Repository   string                 `json:"repository"`
+	Tasks        []*types.Task          `json:"tasks"`
+	Epics        []*types.Epic          `json:"epics"`
 	Dependencies []types.TaskDependency `json:"dependencies"`
-	Worktrees  []*WorktreeInfo    `json:"worktrees"`
+	Worktrees    []*WorktreeInfo        `json:"worktrees"`
 }
 
 // ImportSession imports a session from an export

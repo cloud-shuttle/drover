@@ -14,10 +14,10 @@ func TestParseIntOrDefault(t *testing.T) {
 		{"5", 10, 5},
 		{"100", 0, 100},
 		{"-3", 10, -3},
-		{"abc", 10, 10},       // invalid returns default
-		{"", 10, 10},          // empty returns default
-		{"3.14", 10, 3},       // parses integer prefix (3)
-		{"7xyz", 10, 7},       // parses prefix
+		{"abc", 10, 10}, // invalid returns default
+		{"", 10, 10},    // empty returns default
+		{"3.14", 10, 3}, // parses integer prefix (3)
+		{"7xyz", 10, 7}, // parses prefix
 	}
 
 	for _, tt := range tests {

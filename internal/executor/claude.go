@@ -71,17 +71,17 @@ func (e *Executor) Execute(worktreePath string, task *types.Task) *ExecutionResu
 
 	if err != nil {
 		return &ExecutionResult{
-			Success: false,
-			Output:  fullOutput,
-			Error:   fmt.Errorf("claude failed after %v: %w", duration, err),
+			Success:  false,
+			Output:   fullOutput,
+			Error:    fmt.Errorf("claude failed after %v: %w", duration, err),
 			Duration: duration,
 		}
 	}
 
 	return &ExecutionResult{
-		Success: true,
-		Output:  fullOutput,
-		Error:   nil,
+		Success:  true,
+		Output:   fullOutput,
+		Error:    nil,
 		Duration: duration,
 	}
 }
@@ -201,9 +201,9 @@ func (e *Executor) ExecuteWithContext(ctx context.Context, worktreePath string, 
 	telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeClaudeCode, duration)
 
 	return &ExecutionResult{
-		Success: true,
-		Output:  fullOutput,
-		Error:   nil,
+		Success:  true,
+		Output:   fullOutput,
+		Error:    nil,
 		Duration: duration,
 	}
 }

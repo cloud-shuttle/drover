@@ -23,7 +23,7 @@ type Agent interface {
 
 // AgentConfig contains configuration for creating an agent
 type AgentConfig struct {
-	// Type is the agent type: "claude", "codex", or "amp"
+	// Type is the agent type: "claude", "codex", "amp", or "copilot"
 	Type string
 
 	// Path is the path to the agent binary (for claude/codex/amp CLIs)
@@ -45,6 +45,8 @@ func NewAgent(cfg *AgentConfig) (Agent, error) {
 		return NewCodexAgent(cfg.Path, cfg.Timeout), nil
 	case "amp":
 		return NewAmpAgent(cfg.Path, cfg.Timeout), nil
+	case "copilot":
+		return NewCopilotAgent(cfg.Path, cfg.Timeout), nil
 	case "opencode":
 		return NewOpenCodeAgent(cfg.Path, cfg.Timeout), nil
 	default:

@@ -1,4 +1,4 @@
-// Package executor provides Claude Code agent implementation
+// Package executor provides Copilot CLI agent implementation
 package executor
 
 import (
@@ -17,34 +17,33 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// ClaudeAgent runs tasks using Claude Code CLI
-type ClaudeAgent struct {
-	claudePath string
-	timeout    time.Duration
-	verbose    bool
+// CopilotAgent runs tasks using GitHub Copilot CLI
+type CopilotAgent struct {
+	copilotPath string
+	timeout     time.Duration
+	verbose     bool
 }
 
-// NewClaudeAgent creates a new Claude Code agent
-func NewClaudeAgent(claudePath string, timeout time.Duration) *ClaudeAgent {
-	return &ClaudeAgent{
-		claudePath: claudePath,
-		timeout:    timeout,
-		verbose:    false,
+// NewCopilotAgent creates a new Copilot CLI agent
+func NewCopilotAgent(copilotPath string, timeout time.Duration) *CopilotAgent {
+	return &CopilotAgent{
+		copilotPath: copilotPath,
+		timeout:     timeout,
+		verbose:     false,
 	}
 }
 
 // SetVerbose enables or disables verbose logging
-func (a *ClaudeAgent) SetVerbose(v bool) {
+func (a *CopilotAgent) SetVerbose(v bool) {
 	a.verbose = v
 }
 
 // ExecuteWithContext runs a task with a context and returns the execution result
-func (a *ClaudeAgent) ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task, parentSpan ...trace.Span) *ExecutionResult {
-	// Start telemetry span for agent execution
+func (a *CopilotAgent) ExecuteWithContext(ctx context.Context, worktreePath string, task *types.Task, parentSpan ...trace.Span) *ExecutionResult {
 	var agentCtx context.Context
 	var span trace.Span
 	if len(parentSpan) > 0 && parentSpan[0] != nil {
-		agentCtx, span = telemetry.StartAgentSpan(ctx, telemetry.AgentTypeClaudeCode, "unknown",
+		agentCtx, span = telemetry.StartAgentSpan(ctx, telemetry.AgentTypeCopilot, "unknown",
 			attribute.String(telemetry.KeyTaskID, task.ID),
 			attribute.String(telemetry.KeyTaskTitle, task.Title),
 		)
@@ -54,76 +53,72 @@ func (a *ClaudeAgent) ExecuteWithContext(ctx context.Context, worktreePath strin
 		span = trace.SpanFromContext(ctx)
 	}
 
-	// Record agent prompt
-	telemetry.RecordAgentPrompt(agentCtx, telemetry.AgentTypeClaudeCode)
+	telemetry.RecordAgentPrompt(agentCtx, telemetry.AgentTypeCopilot)
 
-	// Build the prompt
 	prompt := a.buildPrompt(task)
 
-	// Log what we're sending to Claude (verbose only)
 	if a.verbose {
-		log.Printf("🤖 Sending prompt to Claude (length: %d chars)", len(prompt))
+		log.Printf("🤖 Sending prompt to Copilot (length: %d chars)", len(prompt))
 		log.Printf("📝 Prompt preview: %s", truncateString(prompt, 200))
 	}
 
-	// Run Claude Code with prompt as positional argument in print mode
-	// Use -p for non-interactive mode and pass prompt as argument
-	// Add --dangerously-skip-permissions to avoid hanging on permission prompts
-	cmd := exec.CommandContext(ctx, a.claudePath, "-p", prompt, "--dangerously-skip-permissions")
+	args := []string{
+		"-p",
+		prompt,
+		"--allow-all-paths",
+		"--allow-all-tools",
+	}
+
+	cmd := exec.CommandContext(ctx, a.copilotPath, args...)
 	cmd.Dir = worktreePath
 
-	// Capture output while also streaming to stdout/stderr for real-time viewing
 	var outputBuf, errBuf strings.Builder
 	cmd.Stdout = io.MultiWriter(os.Stdout, &outputBuf)
 	cmd.Stderr = io.MultiWriter(os.Stderr, &errBuf)
 
 	start := time.Now()
 	if a.verbose {
-		log.Printf("⏱️  Claude execution started at %s", start.Format("15:04:05"))
+		log.Printf("⏱️  Copilot execution started at %s", start.Format("15:04:05"))
 	}
 	err := cmd.Run()
 	duration := time.Since(start)
 
-	// Combine stdout and stderr for the result
 	fullOutput := outputBuf.String() + errBuf.String()
 
-	// Log exit code regardless of success/failure
 	if err != nil {
 		exitCode := 1
 		if exitError, ok := err.(*exec.ExitError); ok {
 			exitCode = exitError.ExitCode()
 		}
 		if a.verbose {
-			log.Printf("❌ Claude exited with code %d after %v", exitCode, duration)
+			log.Printf("❌ Copilot exited with code %d after %v", exitCode, duration)
 		}
 
-		// Record error
-		telemetry.RecordAgentError(agentCtx, telemetry.AgentTypeClaudeCode, "execution_failed")
+		telemetry.RecordAgentError(agentCtx, telemetry.AgentTypeCopilot, "execution_failed")
 
 		if ctx.Err() == context.DeadlineExceeded {
 			telemetry.RecordError(span, err, "TimeoutError", telemetry.ErrorCategoryTimeout)
-			telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeClaudeCode, duration)
+			telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeCopilot, duration)
 			return &ExecutionResult{
 				Success: false,
 				Output:  fullOutput,
-				Error:   fmt.Errorf("claude timed out after %v", duration),
+				Error:   fmt.Errorf("copilot timed out after %v", duration),
 			}
 		}
 		telemetry.RecordError(span, err, "ExecutionError", telemetry.ErrorCategoryAgent)
-		telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeClaudeCode, duration)
+		telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeCopilot, duration)
 		return &ExecutionResult{
 			Success: false,
 			Output:  fullOutput,
-			Error:   fmt.Errorf("claude failed after %v: %w", duration, err),
+			Error:   fmt.Errorf("copilot failed after %v: %w", duration, err),
 		}
 	}
 
 	if a.verbose {
-		log.Printf("✅ Claude completed successfully in %v", duration)
+		log.Printf("✅ Copilot completed successfully in %v", duration)
 	}
 
-	// Record successful completion
-	telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeClaudeCode, duration)
+	telemetry.RecordAgentDuration(agentCtx, telemetry.AgentTypeCopilot, duration)
 
 	return &ExecutionResult{
 		Success:  true,
@@ -133,21 +128,20 @@ func (a *ClaudeAgent) ExecuteWithContext(ctx context.Context, worktreePath strin
 	}
 }
 
-// CheckInstalled verifies Claude Code is available
-func (a *ClaudeAgent) CheckInstalled() error {
-	cmd := exec.Command(a.claudePath, "--version")
+// CheckInstalled verifies Copilot CLI is available
+func (a *CopilotAgent) CheckInstalled() error {
+	cmd := exec.Command(a.copilotPath, "--version")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("claude not found at %s: %w\n%s", a.claudePath, err, output)
+		return fmt.Errorf("copilot not found at %s: %w\n%s", a.copilotPath, err, output)
 	}
 	return nil
 }
 
-// buildPrompt creates the Claude prompt for a task
-func (a *ClaudeAgent) buildPrompt(task *types.Task) string {
+// buildPrompt creates the Copilot prompt for a task
+func (a *CopilotAgent) buildPrompt(task *types.Task) string {
 	var prompt strings.Builder
 
-	// Start with human guidance if present
 	if task.ExecutionContext != nil && len(task.ExecutionContext.Guidance) > 0 {
 		prompt.WriteString("=== HUMAN GUIDANCE ===\n")
 		prompt.WriteString("The following guidance has been provided for this task:\n\n")

@@ -26,16 +26,16 @@ func GetGlobal() *Server {
 
 // Event types for WebSocket broadcasting
 const (
-	EventTaskClaimed    = "task_claimed"
-	EventTaskStarted    = "task_started"
-	EventTaskCompleted  = "task_completed"
-	EventTaskFailed     = "task_failed"
-	EventTaskBlocked    = "task_blocked"
-	EventTaskPaused     = "task_paused"
-	EventTaskResumed    = "task_resumed"
-	EventTaskGuidance   = "task_guidance"
-	EventWorkerStatus   = "worker_status"
-	EventStatsUpdate    = "stats_update"
+	EventTaskClaimed   = "task_claimed"
+	EventTaskStarted   = "task_started"
+	EventTaskCompleted = "task_completed"
+	EventTaskFailed    = "task_failed"
+	EventTaskBlocked   = "task_blocked"
+	EventTaskPaused    = "task_paused"
+	EventTaskResumed   = "task_resumed"
+	EventTaskGuidance  = "task_guidance"
+	EventWorkerStatus  = "worker_status"
+	EventStatsUpdate   = "stats_update"
 )
 
 // TaskEvent is broadcast when a task state changes

@@ -18,11 +18,12 @@ var hierarchicalIDPattern = regexp.MustCompile(`^([a-z]+-\d+)(?:\.(\d+)(?:\.(\d+
 // Returns: (baseID, level1Seq, level2Seq, error)
 //
 // Examples:
-//   "task-123"           -> ("task-123", 0, 0, nil)
-//   "task-123.1"         -> ("task-123", 1, 0, nil)
-//   "task-123.1.2"       -> ("task-123", 1, 2, nil)
-//   "task-123.5.10"      -> ("task-123", 5, 10, nil)
-//   "invalid"            -> ("", 0, 0, error)
+//
+//	"task-123"           -> ("task-123", 0, 0, nil)
+//	"task-123.1"         -> ("task-123", 1, 0, nil)
+//	"task-123.1.2"       -> ("task-123", 1, 2, nil)
+//	"task-123.5.10"      -> ("task-123", 5, 10, nil)
+//	"invalid"            -> ("", 0, 0, error)
 func ParseHierarchicalID(id string) (string, int, int, error) {
 	matches := hierarchicalIDPattern.FindStringSubmatch(id)
 	if matches == nil {
@@ -45,9 +46,10 @@ func ParseHierarchicalID(id string) (string, int, int, error) {
 
 // GetIDDepth returns the depth level of a hierarchical ID
 // Returns:
-//   0 = base task (no dots)
-//   1 = first-level sub-task
-//   2 = second-level sub-task
+//
+//	0 = base task (no dots)
+//	1 = first-level sub-task
+//	2 = second-level sub-task
 func GetIDDepth(id string) int {
 	_, level1, level2, err := ParseHierarchicalID(id)
 	if err != nil {
@@ -69,8 +71,9 @@ func GetIDDepth(id string) int {
 // sequence: position among siblings (1-indexed)
 //
 // Examples:
-//   GenerateHierarchicalID("task-123", 1, 1) -> "task-123.1"
-//   GenerateHierarchicalID("task-123.1", 2, 2) -> "task-123.1.2"
+//
+//	GenerateHierarchicalID("task-123", 1, 1) -> "task-123.1"
+//	GenerateHierarchicalID("task-123.1", 2, 2) -> "task-123.1.2"
 func GenerateHierarchicalID(baseID string, level int, sequence int) string {
 	return fmt.Sprintf("%s.%d", baseID, sequence)
 }
@@ -94,9 +97,10 @@ func ValidateHierarchicalID(id string, maxDepth int) error {
 // ExtractBaseID returns the base ID without sequence numbers
 //
 // Examples:
-//   "task-123.1.2" -> "task-123"
-//   "task-123.1"   -> "task-123"
-//   "task-123"     -> "task-123"
+//
+//	"task-123.1.2" -> "task-123"
+//	"task-123.1"   -> "task-123"
+//	"task-123"     -> "task-123"
 func ExtractBaseID(id string) string {
 	baseID, _, _, _ := ParseHierarchicalID(id)
 	return baseID
@@ -111,9 +115,10 @@ func IsSubTask(id string) bool {
 // Returns empty string if the ID is already a base task (no parent)
 //
 // Examples:
-//   "task-123.1"   -> "task-123"
-//   "task-123.1.2" -> "task-123.1"
-//   "task-123"     -> ""
+//
+//	"task-123.1"   -> "task-123"
+//	"task-123.1.2" -> "task-123.1"
+//	"task-123"     -> ""
 func GetParentIDFromHierarchicalID(id string) string {
 	lastDot := strings.LastIndex(id, ".")
 	if lastDot == -1 {

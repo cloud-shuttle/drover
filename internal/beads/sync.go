@@ -20,7 +20,7 @@ import (
 
 // BeadRecord represents a single line in beads.jsonl
 type BeadRecord struct {
-	Type      string          `json:"type"`       // "bead", "epic", "link"
+	Type      string          `json:"type"` // "bead", "epic", "link"
 	ID        string          `json:"id"`
 	Timestamp time.Time       `json:"timestamp"`
 	Data      json.RawMessage `json:"data"`

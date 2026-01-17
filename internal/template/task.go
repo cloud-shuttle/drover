@@ -9,19 +9,19 @@ import (
 
 // TaskTemplate defines the structure for high-quality tasks
 type TaskTemplate struct {
-	Title          string            `json:"title"`
-	Description    string            `json:"description"`
-	TargetFiles    []string          `json:"target_files,omitempty"`      // Specific files to modify
-	Components     []string          `json:"components,omitempty"`        // Specific components
-	Action         string            `json:"action"`                      // create, fix, update, refactor, test
-	AcceptanceCriteria []string      `json:"acceptance_criteria,omitempty"`
-	Context        string            `json:"context,omitempty"`           // Additional context
+	Title              string   `json:"title"`
+	Description        string   `json:"description"`
+	TargetFiles        []string `json:"target_files,omitempty"` // Specific files to modify
+	Components         []string `json:"components,omitempty"`   // Specific components
+	Action             string   `json:"action"`                 // create, fix, update, refactor, test
+	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
+	Context            string   `json:"context,omitempty"` // Additional context
 }
 
 // ValidationError represents a validation error with suggestions
 type ValidationError struct {
-	Field   string   `json:"field"`
-	Message string   `json:"message"`
+	Field       string   `json:"field"`
+	Message     string   `json:"message"`
 	Suggestions []string `json:"suggestions,omitempty"`
 }
 
