@@ -17,6 +17,21 @@ const (
 	ProviderGrok      ProviderType = "grok"
 )
 
+// String returns the string representation of the provider type
+func (p ProviderType) String() string {
+	return string(p)
+}
+
+// IsValid checks if the provider type is valid
+func (p ProviderType) IsValid() bool {
+	switch p {
+	case ProviderAnthropic, ProviderOpenAI, ProviderGLM, ProviderGroq, ProviderGrok:
+		return true
+	default:
+		return false
+	}
+}
+
 // Role represents the role of a message sender
 type Role string
 
@@ -26,6 +41,11 @@ const (
 	RoleAssistant Role = "assistant"
 	RoleTool      Role = "tool"
 )
+
+// String returns the string representation of the role
+func (r Role) String() string {
+	return string(r)
+}
 
 // Message represents a chat message
 type Message struct {
@@ -131,6 +151,18 @@ type StreamEvent struct {
 	Data  any    `json:"data"`
 	Event string `json:"event,omitempty"` // Optional event type
 	Error error  `json:"error,omitempty"`
+}
+
+// StreamError represents an error during streaming
+type StreamError struct {
+	Provider ProviderType
+	Message  string
+	Code     string
+}
+
+// Error returns the error message
+func (e *StreamError) Error() string {
+	return e.Provider.String() + ": " + e.Message + " (" + e.Code + ")"
 }
 
 // Model represents an available model

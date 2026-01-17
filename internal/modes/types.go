@@ -44,6 +44,11 @@ const (
 	TriggerOnDependency PlanRefinementTrigger = "on_dependency" // Dependencies changed
 )
 
+// String returns the string representation of the trigger
+func (t PlanRefinementTrigger) String() string {
+	return string(t)
+}
+
 // Config holds configuration for worker modes
 type Config struct {
 	// Mode is the current worker mode

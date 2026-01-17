@@ -62,11 +62,7 @@ func DefaultBuildingPrompt() string {
 		"### Overview\n" +
 		"{{.PlanOverview}}\n\n" +
 		"### Steps to Execute\n" +
-		"{{range .PlanSteps}}{{.Order}}. **{{.Title}}**\n" +
-		"   - {{.Description}}\n" +
-		"   - Files: {{.Files}}\n" +
-		"   - Verification: {{.Verification}}\n" +
-		"{{end}}\n\n" +
+		"{{.PlanSteps}}\n\n" +
 		"## Execution Guidelines\n\n" +
 		"1. **Follow the Plan**: Execute steps in the specified order\n" +
 		"2. **Make Changes**: Use file editing tools to make code changes\n" +
@@ -94,11 +90,7 @@ func DefaultRefinementPrompt() string {
 		"### Plan Overview\n" +
 		"{{.PlanOverview}}\n\n" +
 		"### Steps\n" +
-		"{{range .PlanSteps}}{{.Order}}. {{.Title}}\n" +
-		"   - {{.Description}}\n" +
-		"   - Status: {{if .Success}}Success{{else}}Failed{{end}}\n" +
-		"   {{if .Error}}Error: {{.Error}}{{end}}\n" +
-		"{{end}}\n\n" +
+		"{{.PlanSteps}}\n\n" +
 		"## Failure/Rejection Reason\n" +
 		"{{.FailureReason}}\n\n" +
 		"## Your Task\n\n" +
