@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/analytics"
 	"github.com/cloud-shuttle/drover/internal/modes"
 	"github.com/cloud-shuttle/drover/internal/webhooks"
 )
@@ -66,6 +67,11 @@ type Config struct {
 	WebhookURL      string
 	WebhookSecret   string
 	WebhookWorkers  int
+
+	// Analytics settings
+	AnalyticsEnabled  bool
+	AnalyticsConfig   string
+	AnalyticsMaxMetrics int
 }
 
 // Load loads configuration from environment and defaults
@@ -93,6 +99,7 @@ func Load() (*Config, error) {
 		RequireApproval: false,    // Default to no approval required
 		Modes:           modes.DefaultConfig(), // Default modes configuration
 		WebhookWorkers:  3,        // Default webhook delivery workers
+		AnalyticsMaxMetrics: 10000, // Default max metrics in memory
 	}
 
 	// Environment overrides
@@ -171,6 +178,18 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DROVER_WEBHOOK_WORKERS"); v != "" {
 		cfg.WebhookWorkers = parseIntOrDefault(v, 3)
+	}
+	if v := os.Getenv("DROVER_ANALYTICS_ENABLED"); v != "" {
+		cfg.AnalyticsEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_ANALYTICS_CONFIG"); v != "" {
+		cfg.AnalyticsConfig = v
+	} else if cfg.AnalyticsEnabled {
+		// Default to .drover/analytics.json if enabled but no config specified
+		cfg.AnalyticsConfig = ".drover/analytics.json"
+	}
+	if v := os.Getenv("DROVER_ANALYTICS_MAX_METRICS"); v != "" {
+		cfg.AnalyticsMaxMetrics = parseIntOrDefault(v, 10000)
 	}
 
 	// Resolve AgentPath based on AgentType if not explicitly set
@@ -319,4 +338,22 @@ func (c *Config) CreateWebhookManager() *webhooks.Manager {
 	}
 
 	return mgr
+}
+
+// CreateAnalyticsManager creates and configures an analytics manager from the config
+func (c *Config) CreateAnalyticsManager() (*analytics.Manager, error) {
+	if !c.AnalyticsEnabled {
+		return nil, nil
+	}
+
+	mgr, err := analytics.NewManager(analytics.Config{
+		ConfigPath: c.AnalyticsConfig,
+		MaxMetrics: c.AnalyticsMaxMetrics,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("creating analytics manager: %w", err)
+	}
+
+	fmt.Printf("[config] analytics enabled: %s (maxMetrics=%d)\n", c.AnalyticsConfig, c.AnalyticsMaxMetrics)
+	return mgr, nil
 }

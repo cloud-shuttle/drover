@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/analytics"
 	"github.com/cloud-shuttle/drover/internal/config"
 	"github.com/cloud-shuttle/drover/internal/dashboard"
 	"github.com/cloud-shuttle/drover/internal/db"
@@ -73,6 +74,7 @@ type DBOSOrchestrator struct {
 	dependencyMap  map[string][]string // taskID -> list of dependent task IDs
 	dependencyMu   sync.RWMutex
 	webhooks       *webhooks.Manager // Webhook notification manager
+	analytics      *analytics.Manager // Analytics manager
 }
 
 // NewDBOSOrchestrator creates a new DBOS-based orchestrator
@@ -109,9 +111,9 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 
 	// Create webhook manager
 	webhookMgr := cfg.CreateWebhookManager()
-	if cfg.WebhooksEnabled {
-		webhookMgr.Start(cfg.WebhookWorkers)
-	}
+
+	// Create analytics manager
+	analyticsMgr, _ := cfg.CreateAnalyticsManager()
 
 	return &DBOSOrchestrator{
 		config:        cfg,
@@ -123,6 +125,7 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 		verbose:       cfg.Verbose,
 		dependencyMap: make(map[string][]string),
 		webhooks:      webhookMgr,
+		analytics:     analyticsMgr,
 	}, nil
 }
 
@@ -381,6 +384,11 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		o.webhooks.EmitTaskStarted(task.TaskID, task.Title, "dbos-workflow")
 	}
 
+	// Start analytics tracking
+	if o.analytics != nil {
+		o.analytics.StartTask(task.TaskID, task.Title, o.config.AgentType, "")
+	}
+
 	// Create worktree for isolated execution (as a step)
 	worktreePath, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (string, error) {
 		return o.createWorktreeStep(stepCtx, task)
@@ -392,6 +400,9 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
 		if o.webhooks != nil {
 			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
+		}
+		if o.analytics != nil {
+			o.analytics.EndTask(task.TaskID, "failed", errMsg)
 		}
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
@@ -408,6 +419,9 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		if o.webhooks != nil {
 			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
 		}
+		if o.analytics != nil {
+			o.analytics.EndTask(task.TaskID, "failed", errMsg)
+		}
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
@@ -418,6 +432,9 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
 		if o.webhooks != nil {
 			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
+		}
+		if o.analytics != nil {
+			o.analytics.EndTask(task.TaskID, "failed", errMsg)
 		}
 		return TaskResult{
 			Success: false,
@@ -460,6 +477,11 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	// Emit webhook event
 	if o.webhooks != nil {
 		o.webhooks.EmitTaskCompleted(task.TaskID, task.Title, duration.Milliseconds())
+	}
+
+	// End analytics tracking
+	if o.analytics != nil {
+		o.analytics.EndTask(task.TaskID, "success", "")
 	}
 
 	// Record task completion

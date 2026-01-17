@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/analytics"
 	"github.com/cloud-shuttle/drover/internal/beads"
 	"github.com/cloud-shuttle/drover/internal/config"
 	"github.com/cloud-shuttle/drover/internal/dashboard"
@@ -38,6 +39,7 @@ type Orchestrator struct {
 	projectDir string // Project directory for beads sync
 	epicID   string // Optional epic filter for task execution
 	webhooks *webhooks.Manager // Webhook notification manager
+	analytics *analytics.Manager // Analytics manager
 }
 
 // NewOrchestrator creates a new workflow orchestrator
@@ -81,16 +83,11 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 
 	agent.SetVerbose(cfg.Verbose)
 
-	// Create webhook manager
+	// Create webhook manager (will be started in Run())
 	webhookMgr := cfg.CreateWebhookManager()
-	if cfg.WebhooksEnabled {
-		webhookMgr.Start(cfg.WebhookWorkers)
-		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = webhookMgr.Stop(ctx)
-		}()
-	}
+
+	// Create analytics manager (will be started in Run())
+	analyticsMgr, _ := cfg.CreateAnalyticsManager()
 
 	// Check agent is installed
 	if err := agent.CheckInstalled(); err != nil {
@@ -110,6 +107,7 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 		verbose:    cfg.Verbose,
 		projectDir: projectDir,
 		webhooks:   webhookMgr,
+		analytics:  analyticsMgr,
 	}, nil
 }
 
@@ -132,6 +130,26 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	// Start workflow span for telemetry
 	_, workflowSpan := telemetry.StartWorkflowSpan(ctx, telemetry.SpanWorkflowRun, "")
 	defer workflowSpan.End()
+
+	// Start webhook manager
+	if o.webhooks != nil && o.config.WebhooksEnabled {
+		o.webhooks.Start(o.config.WebhookWorkers)
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = o.webhooks.Stop(stopCtx)
+		}()
+	}
+
+	// Analytics manager starts automatically on creation
+	// Just ensure it stops on exit
+	if o.analytics != nil {
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = o.analytics.Stop(stopCtx)
+		}()
+	}
 
 	// Ensure pool is stopped when we exit
 	if o.pool != nil {
@@ -273,6 +291,11 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	// Emit webhook event
 	if o.webhooks != nil {
 		o.webhooks.EmitTaskStarted(task.ID, task.Title, workerIDStr)
+	}
+
+	// Start analytics tracking
+	if o.analytics != nil {
+		o.analytics.StartTask(task.ID, task.Title, o.config.AgentType, "")
 	}
 
 	// Ensure task is always marked complete or failed, even if we panic
@@ -420,6 +443,11 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	// Emit webhook event
 	if o.webhooks != nil {
 		o.webhooks.EmitTaskCompleted(task.ID, task.Title, duration.Milliseconds())
+	}
+
+	// End analytics tracking
+	if o.analytics != nil {
+		o.analytics.EndTask(task.ID, "success", "")
 	}
 
 	// Record task completion telemetry
@@ -573,6 +601,9 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 		if o.webhooks != nil {
 			o.webhooks.EmitTaskFailed(taskID, taskID, errorMsg, task.Attempts)
 		}
+		if o.analytics != nil {
+			o.analytics.EndTask(taskID, "failed", errorMsg)
+		}
 		return false
 	}
 
@@ -584,6 +615,9 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 		if o.webhooks != nil {
 			o.webhooks.EmitTaskFailed(task.ID, task.Title, errorMsg, task.Attempts)
 		}
+		if o.analytics != nil {
+			o.analytics.EndTask(taskID, "failed", errorMsg)
+		}
 		return false
 	}
 
@@ -592,6 +626,9 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 		log.Printf("Error incrementing attempts for task %s: %v", taskID, err)
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
 		dashboard.BroadcastTaskFailed(task.ID, task.Title, errorMsg)
+		if o.analytics != nil {
+			o.analytics.EndTask(taskID, "failed", errorMsg)
+		}
 		return false
 	}
 
