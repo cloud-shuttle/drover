@@ -29,6 +29,16 @@ const (
 	TaskTypeOther    TaskType = "other"    // Other type
 )
 
+// TaskVerdict represents the structured outcome of a task execution
+type TaskVerdict string
+
+const (
+	TaskVerdictPass    TaskVerdict = "pass"     // Task completed successfully
+	TaskVerdictFail    TaskVerdict = "fail"     // Task failed
+	TaskVerdictBlocked TaskVerdict = "blocked"  // Task was blocked
+	TaskVerdictUnknown TaskVerdict = "unknown"  // Verdict could not be determined
+)
+
 // Task represents a unit of work for an AI agent
 type Task struct {
 	ID             string                `json:"id" db:"id"`
@@ -46,6 +56,8 @@ type Task struct {
 	ClaimedBy      string                `json:"claimed_by" db:"claimed_by"`
 	ClaimedAt      *int64                `json:"claimed_at" db:"claimed_at"`
 	Operator       string                `json:"operator" db:"operator"` // The operator/user who created or claimed this task
+	Verdict        TaskVerdict           `json:"verdict" db:"verdict"`     // Structured outcome verdict
+	VerdictReason   string               `json:"verdict_reason" db:"verdict_reason"` // Reason for verdict
 	CreatedAt      int64                 `json:"created_at" db:"created_at"`
 	UpdatedAt      int64                 `json:"updated_at" db:"updated_at"`
 	// ExecutionContext is not persisted in DB - it's set at runtime for execution

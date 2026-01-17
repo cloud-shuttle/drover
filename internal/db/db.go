@@ -246,6 +246,8 @@ func (s *Store) InitSchema() error {
 		claimed_by TEXT,
 		claimed_at INTEGER,
 		operator TEXT DEFAULT '',
+		verdict TEXT DEFAULT 'unknown',
+		verdict_reason TEXT,
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL,
 		FOREIGN KEY (epic_id) REFERENCES epics(id),
@@ -576,6 +578,26 @@ func (s *Store) MigrateSchema() error {
 		`)
 		if err != nil {
 			return fmt.Errorf("creating events table: %w", err)
+		}
+	}
+
+	// Check if verdict column exists (added for structured task outcomes)
+	var verdictExists bool
+	err = s.DB.QueryRow(`
+		SELECT COUNT(*) > 0 FROM pragma_table_info('tasks') WHERE name = 'verdict'
+	`).Scan(&verdictExists)
+	if err != nil {
+		return fmt.Errorf("checking for verdict column: %w", err)
+	}
+
+	if !verdictExists {
+		// Add verdict columns for structured task outcomes
+		_, err := s.DB.Exec(`
+			ALTER TABLE tasks ADD COLUMN verdict TEXT DEFAULT 'unknown';
+			ALTER TABLE tasks ADD COLUMN verdict_reason TEXT;
+		`)
+		if err != nil {
+			return fmt.Errorf("adding verdict columns: %w", err)
 		}
 	}
 
@@ -1009,6 +1031,17 @@ func (s *Store) UpdateTaskStatus(taskID string, status types.TaskStatus, lastErr
 	return err
 }
 
+// SetTaskVerdict sets the structured verdict for a task
+func (s *Store) SetTaskVerdict(taskID string, verdict types.TaskVerdict, reason string) error {
+	now := time.Now().Unix()
+	_, err := s.DB.Exec(`
+		UPDATE tasks
+		SET verdict = ?, verdict_reason = ?, updated_at = ?
+		WHERE id = ?
+	`, verdict, reason, now, taskID)
+	return err
+}
+
 // IncrementTaskAttempts increments the attempt counter for a task
 func (s *Store) IncrementTaskAttempts(taskID string) error {
 	now := time.Now().Unix()
@@ -1028,6 +1061,7 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 	var epicID sql.NullString
 	var description sql.NullString
 	var operator sql.NullString
+	var verdictReason sql.NullString
 
 	err := s.DB.QueryRow(`
 		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
@@ -1035,7 +1069,8 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 		       COALESCE(type, 'other'),
 		       priority, status, attempts, max_attempts,
 		       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
-		       COALESCE(operator, ''), created_at, updated_at
+		       COALESCE(operator, ''), COALESCE(verdict, 'unknown'),
+		       COALESCE(verdict_reason, ''), created_at, updated_at
 		FROM tasks
 		WHERE id = ?
 	`, taskID).Scan(
@@ -1044,6 +1079,7 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 		&task.Type,
 		&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
 		&claimedBy, &claimedAt, &operator,
+		&task.Verdict, &verdictReason,
 		&task.CreatedAt, &task.UpdatedAt,
 	)
 
@@ -1054,6 +1090,7 @@ func (s *Store) GetTask(taskID string) (*types.Task, error) {
 	task.Description = description.String
 	task.EpicID = epicID.String
 	task.Operator = operator.String
+	task.VerdictReason = verdictReason.String
 	if claimedBy.Valid {
 		task.ClaimedBy = claimedBy.String
 	}

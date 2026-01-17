@@ -23,6 +23,7 @@ import (
 	"github.com/cloud-shuttle/drover/internal/dashboard"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/events"
+	outcomepkg "github.com/cloud-shuttle/drover/internal/outcome"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/internal/project"
@@ -497,6 +498,12 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 		"title":    task.Title,
 		"duration": duration.Milliseconds(),
 	})
+
+	// Parse and store structured outcome
+	outcome := outcomepkg.ParseOutput(claudeOutput)
+	if err := o.store.SetTaskVerdict(task.ID, types.TaskVerdict(outcome.Verdict), outcome.Summary); err != nil {
+		log.Printf("Error storing verdict for task %s: %v", task.ID, err)
+	}
 
 	// End analytics tracking
 	if o.analytics != nil {

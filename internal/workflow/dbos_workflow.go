@@ -20,6 +20,7 @@ import (
 	"github.com/cloud-shuttle/drover/internal/dashboard"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/events"
+	outcomepkg "github.com/cloud-shuttle/drover/internal/outcome"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/internal/project"
@@ -544,6 +545,12 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		"title":    task.Title,
 		"duration": duration.Milliseconds(),
 	})
+
+	// Parse and store structured outcome
+	outcome := outcomepkg.ParseOutput(claudeResult.Output)
+	if err := o.store.SetTaskVerdict(task.TaskID, types.TaskVerdict(outcome.Verdict), outcome.Summary); err != nil {
+		log.Printf("Error storing verdict for task %s: %v", task.TaskID, err)
+	}
 
 	// End analytics tracking
 	if o.analytics != nil {
