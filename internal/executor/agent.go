@@ -26,6 +26,9 @@ type Agent interface {
 
 	// SetContextManager sets the context window manager for the agent
 	SetContextManager(manager *ctxmngr.Manager)
+
+	// SetTaskContext sets recent completed tasks for context carrying
+	SetTaskContext(recentTasks []*types.Task, taskContextCount int)
 }
 
 // AgentConfig contains configuration for creating an agent

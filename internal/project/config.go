@@ -20,7 +20,8 @@ type Config struct {
 	MaxAttempts  int           `toml:"max_attempts"`
 
 	// Context settings
-	TaskContextCount int `toml:"task_context_count"`
+	TaskContextCount  int           `toml:"task_context_count"`
+	TaskContextMaxAge time.Duration `toml:"task_context_max_age"`
 
 	// Size thresholds
 	MaxDescriptionSize ByteSize `toml:"max_description_size"`
@@ -98,15 +99,16 @@ func (b ByteSize) String() string {
 // DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Agent:            "claude",
-		MaxWorkers:       3,
-		TaskTimeout:      60 * time.Minute,
-		MaxAttempts:      3,
-		TaskContextCount: 5,
+		Agent:             "claude",
+		MaxWorkers:        3,
+		TaskTimeout:       60 * time.Minute,
+		MaxAttempts:       3,
+		TaskContextCount:  5,
+		TaskContextMaxAge: 24 * time.Hour, // 24 hours
 		MaxDescriptionSize: 250 * 1024 * 1024, // 250MB
-		MaxDiffSize:       250 * 1024 * 1024, // 250MB
-		MaxFileSize:       1024 * 1024,       // 1MB
-		DefaultLabels:     []string{},
+		MaxDiffSize:        250 * 1024 * 1024, // 250MB
+		MaxFileSize:        1024 * 1024,       // 1MB
+		DefaultLabels:      []string{},
 	}
 }
 
@@ -191,6 +193,12 @@ func (c *Config) Validate() error {
 	}
 	if c.TaskContextCount > 20 {
 		return fmt.Errorf("task_context_count cannot exceed 20")
+	}
+	if c.TaskContextMaxAge < time.Minute {
+		return fmt.Errorf("task_context_max_age must be at least 1 minute")
+	}
+	if c.TaskContextMaxAge > 168*time.Hour { // 7 days
+		return fmt.Errorf("task_context_max_age cannot exceed 7 days")
 	}
 
 	// Validate agent type

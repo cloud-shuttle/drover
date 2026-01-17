@@ -1426,6 +1426,127 @@ func (s *Store) ListTasksByEpic(epicID string) ([]*types.Task, error) {
 	return tasks, nil
 }
 
+// GetRecentCompletedTasks returns recently completed tasks for context carrying
+// epicID: filter to tasks in the same epic (empty string = all epics)
+// limit: maximum number of tasks to return
+// maxAge: only return tasks completed within this duration (in seconds, 0 = no limit)
+func (s *Store) GetRecentCompletedTasks(epicID string, limit int, maxAgeSeconds int64) ([]*types.Task, error) {
+	var rows *sql.Rows
+	var err error
+
+	// Build query with filters
+	if epicID != "" && maxAgeSeconds > 0 {
+		// Filter by epic and age
+		rows, err = s.DB.Query(`
+			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+			       COALESCE(parent_id, ''), sequence_number,
+			       COALESCE(type, 'other'),
+			       priority, status, attempts, max_attempts,
+			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
+			       COALESCE(operator, ''), created_at, updated_at,
+			       COALESCE(verdict, 'unknown'), COALESCE(verdict_reason, '')
+			FROM tasks
+			WHERE epic_id = ? AND status = 'completed' AND updated_at > ?
+			ORDER BY updated_at DESC
+			LIMIT ?
+		`, epicID, time.Now().Unix()-maxAgeSeconds, limit)
+	} else if epicID != "" {
+		// Filter by epic only
+		rows, err = s.DB.Query(`
+			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+			       COALESCE(parent_id, ''), sequence_number,
+			       COALESCE(type, 'other'),
+			       priority, status, attempts, max_attempts,
+			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
+			       COALESCE(operator, ''), created_at, updated_at,
+			       COALESCE(verdict, 'unknown'), COALESCE(verdict_reason, '')
+			FROM tasks
+			WHERE epic_id = ? AND status = 'completed'
+			ORDER BY updated_at DESC
+			LIMIT ?
+		`, epicID, limit)
+	} else if maxAgeSeconds > 0 {
+		// Filter by age only
+		rows, err = s.DB.Query(`
+			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+			       COALESCE(parent_id, ''), sequence_number,
+			       COALESCE(type, 'other'),
+			       priority, status, attempts, max_attempts,
+			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
+			       COALESCE(operator, ''), created_at, updated_at,
+			       COALESCE(verdict, 'unknown'), COALESCE(verdict_reason, '')
+			FROM tasks
+			WHERE status = 'completed' AND updated_at > ?
+			ORDER BY updated_at DESC
+			LIMIT ?
+		`, time.Now().Unix()-maxAgeSeconds, limit)
+	} else {
+		// No filters, just return recent completed tasks
+		rows, err = s.DB.Query(`
+			SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+			       COALESCE(parent_id, ''), sequence_number,
+			       COALESCE(type, 'other'),
+			       priority, status, attempts, max_attempts,
+			       COALESCE(claimed_by, ''), COALESCE(claimed_at, 0),
+			       COALESCE(operator, ''), created_at, updated_at,
+			       COALESCE(verdict, 'unknown'), COALESCE(verdict_reason, '')
+			FROM tasks
+			WHERE status = 'completed'
+			ORDER BY updated_at DESC
+			LIMIT ?
+		`, limit)
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("querying recent completed tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*types.Task
+	for rows.Next() {
+		var task types.Task
+		var claimedBy sql.NullString
+		var claimedAt sql.NullInt64
+		var epicID sql.NullString
+		var description sql.NullString
+		var parentID sql.NullString
+		var operator sql.NullString
+		var verdict sql.NullString
+		var verdictReason sql.NullString
+
+		err := rows.Scan(
+			&task.ID, &task.Title, &description, &epicID,
+			&parentID, &task.SequenceNumber,
+			&task.Type,
+			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
+			&claimedBy, &claimedAt, &operator,
+			&task.CreatedAt, &task.UpdatedAt,
+			&verdict, &verdictReason,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scanning task: %w", err)
+		}
+
+		task.Description = description.String
+		task.EpicID = epicID.String
+		task.ParentID = parentID.String
+		task.Operator = operator.String
+		task.Verdict = types.TaskVerdict(verdict.String)
+		task.VerdictReason = verdictReason.String
+		if claimedBy.Valid {
+			task.ClaimedBy = claimedBy.String
+		}
+		if claimedAt.Valid {
+			unix := claimedAt.Int64
+			task.ClaimedAt = &unix
+		}
+
+		tasks = append(tasks, &task)
+	}
+
+	return tasks, nil
+}
+
 // GetBlockedBy returns the list of task IDs that block the given task
 func (s *Store) GetBlockedBy(taskID string) ([]string, error) {
 	rows, err := s.DB.Query(`

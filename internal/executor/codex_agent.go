@@ -12,6 +12,7 @@ import (
 	"time"
 
 	ctxmngr "github.com/cloud-shuttle/drover/internal/context"
+	"github.com/cloud-shuttle/drover/internal/taskcontext"
 	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"go.opentelemetry.io/otel/attribute"
@@ -26,6 +27,8 @@ type CodexAgent struct {
 	verbose           bool
 	projectGuidelines string
 	contextManager    *ctxmngr.Manager
+	recentTasks       []*types.Task
+	taskContextCount  int
 }
 
 // NewCodexAgent creates a new Codex agent
@@ -50,6 +53,12 @@ func (a *CodexAgent) SetProjectGuidelines(guidelines string) {
 // SetContextManager sets the context window manager for the agent
 func (a *CodexAgent) SetContextManager(manager *ctxmngr.Manager) {
 	a.contextManager = manager
+}
+
+// SetTaskContext sets recent completed tasks for context carrying
+func (a *CodexAgent) SetTaskContext(recentTasks []*types.Task, taskContextCount int) {
+	a.recentTasks = recentTasks
+	a.taskContextCount = taskContextCount
 }
 
 // ExecuteWithContext runs a task with a context and returns the execution result
@@ -173,6 +182,14 @@ func (a *CodexAgent) buildPrompt(task *types.Task) string {
 		prompt.WriteString("=== PROJECT GUIDELINES ===\n")
 		prompt.WriteString(a.projectGuidelines)
 		prompt.WriteString("\n============================\n\n")
+	}
+
+	// Inject recent task context if available
+	if a.taskContextCount > 0 && len(a.recentTasks) > 0 {
+		taskContext := taskcontext.BuildContext(a.recentTasks, task, a.taskContextCount)
+		if taskContext != "" {
+			prompt.WriteString(taskContext)
+		}
 	}
 
 	prompt.WriteString(fmt.Sprintf("Task: %s\n", task.Title))

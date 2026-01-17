@@ -426,6 +426,19 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 		}()
 	}
 
+	// Fetch recent completed tasks for context carrying (if enabled)
+	taskContextCount := o.getProjectTaskContextCount()
+	if taskContextCount > 0 {
+		maxAgeSeconds := int64(o.getProjectTaskContextMaxAge().Seconds())
+		recentTasks, err := o.store.GetRecentCompletedTasks(task.EpicID, taskContextCount, maxAgeSeconds)
+		if err != nil {
+			log.Printf("Warning: failed to fetch recent tasks for context: %v", err)
+		} else if len(recentTasks) > 0 {
+			log.Printf("📚 Loaded %d recent tasks for context", len(recentTasks))
+			o.agent.SetTaskContext(recentTasks, taskContextCount)
+		}
+	}
+
 	// Execute Claude Code and capture the result
 	result := o.agent.ExecuteWithContext(taskCtx, worktreePath, task, taskSpan)
 	if !result.Success {
@@ -802,4 +815,28 @@ func (o *Orchestrator) syncToBeadsIfNeeded() {
 	}
 
 	log.Println("✅ Synced to beads format (.beads/beads.jsonl)")
+}
+
+// getProjectTaskContextCount returns the task context count from project config or default
+func (o *Orchestrator) getProjectTaskContextCount() int {
+	// Try to get from project config if available
+	if o.config.ProjectDir != "" {
+		if projectCfg, err := project.Load(o.projectDir); err == nil {
+			return projectCfg.TaskContextCount
+		}
+	}
+	// Return default if no project config
+	return 5
+}
+
+// getProjectTaskContextMaxAge returns the task context max age from project config or default
+func (o *Orchestrator) getProjectTaskContextMaxAge() time.Duration {
+	// Try to get from project config if available
+	if o.config.ProjectDir != "" {
+		if projectCfg, err := project.Load(o.projectDir); err == nil {
+			return projectCfg.TaskContextMaxAge
+		}
+	}
+	// Return default if no project config
+	return 24 * time.Hour
 }

@@ -72,6 +72,7 @@ type QueueStats struct {
 type DBOSOrchestrator struct {
 	config         *config.Config
 	git            *git.WorktreeManager
+	pool           *git.WorktreePool // Worktree pool for pre-warming
 	agent          executor.Agent // Agent interface for Claude/Codex/Amp
 	dbosCtx        dbos.DBOSContext
 	queue          dbos.WorkflowQueue
@@ -90,6 +91,23 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 		filepath.Join(projectDir, cfg.WorktreeDir),
 	)
 	gitMgr.SetVerbose(cfg.Verbose)
+
+	// Initialize worktree pool if enabled
+	var pool *git.WorktreePool
+	if cfg.PoolEnabled {
+		poolConfig := &git.PoolConfig{
+			MinSize:         cfg.PoolMinSize,
+			MaxSize:         cfg.PoolMaxSize,
+			WarmupTimeout:   cfg.PoolWarmup,
+			CleanupOnExit:   cfg.PoolCleanupOnExit,
+			EnableSymlinks:  true,
+			GoModCache:      true,
+		}
+		pool = git.NewWorktreePool(gitMgr, poolConfig)
+		if err := pool.Start(); err != nil {
+			return nil, fmt.Errorf("starting worktree pool: %w", err)
+		}
+	}
 
 	// Load project configuration
 	projectCfg, err := project.Load(projectDir)
@@ -119,6 +137,9 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 		},
 	})
 	if err != nil {
+		if pool != nil {
+			pool.Stop()
+		}
 		return nil, fmt.Errorf("creating agent: %w", err)
 	}
 
@@ -132,6 +153,9 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 
 	// Check agent is installed
 	if err := agent.CheckInstalled(); err != nil {
+		if pool != nil {
+			pool.Stop()
+		}
 		return nil, fmt.Errorf("checking %s: %w", cfg.AgentType, err)
 	}
 
@@ -150,6 +174,7 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 	return &DBOSOrchestrator{
 		config:        cfg,
 		git:           gitMgr,
+		pool:          pool,
 		agent:         agent,
 		dbosCtx:       dbosCtx,
 		queue:         queue,
@@ -431,6 +456,19 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		o.analytics.StartTask(task.TaskID, task.Title, o.config.AgentType, "")
 	}
 
+	// Fetch recent completed tasks for context carrying (if enabled)
+	taskContextCount := o.getProjectTaskContextCount()
+	if taskContextCount > 0 && o.store != nil {
+		maxAgeSeconds := int64(o.getProjectTaskContextMaxAge().Seconds())
+		recentTasks, err := o.store.GetRecentCompletedTasks(task.EpicID, taskContextCount, maxAgeSeconds)
+		if err != nil {
+			log.Printf("Warning: failed to fetch recent tasks for context: %v", err)
+		} else if len(recentTasks) > 0 {
+			log.Printf("📚 Loaded %d recent tasks for context", len(recentTasks))
+			o.agent.SetTaskContext(recentTasks, taskContextCount)
+		}
+	}
+
 	// Create worktree for isolated execution (as a step)
 	worktreePath, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (string, error) {
 		return o.createWorktreeStep(stepCtx, task)
@@ -648,9 +686,20 @@ func (o *DBOSOrchestrator) createWorktreeStep(ctx context.Context, task TaskInpu
 		Priority: task.Priority,
 	}
 
-	worktreePath, err := o.git.Create(taskObj)
-	if err != nil {
-		return "", fmt.Errorf("creating worktree: %w", err)
+	var worktreePath string
+	var err error
+
+	// Use pool if enabled
+	if o.pool != nil && o.pool.IsEnabled() {
+		worktreePath, err = o.pool.Acquire(task.TaskID)
+		if err != nil {
+			return "", fmt.Errorf("acquiring worktree from pool: %w", err)
+		}
+	} else {
+		worktreePath, err = o.git.Create(taskObj)
+		if err != nil {
+			return "", fmt.Errorf("creating worktree: %w", err)
+		}
 	}
 
 	// Track worktree in database
@@ -716,8 +765,12 @@ func (o *DBOSOrchestrator) mergeToMainStep(ctx context.Context, taskID string) (
 	}
 
 	// Clean up worktree after successful merge
-	if err := o.git.Remove(taskID); err != nil {
-		log.Printf("⚠️  Failed to clean up worktree for task %s: %v", taskID, err)
+	if o.pool != nil && o.pool.IsEnabled() {
+		o.pool.Release(taskID, false) // Don't retain worktree after merge
+	} else {
+		if err := o.git.Remove(taskID); err != nil {
+			log.Printf("⚠️  Failed to clean up worktree for task %s: %v", taskID, err)
+		}
 	}
 
 	// Mark worktree as removed in database
@@ -784,4 +837,35 @@ func (o *DBOSOrchestrator) PrintQueueStats(stats QueueStats) {
 // generateWorkflowID generates a unique workflow ID for telemetry
 func generateWorkflowID() string {
 	return fmt.Sprintf("workflow-%d", time.Now().UnixNano())
+}
+
+// Stop stops the orchestrator and cleans up resources
+func (o *DBOSOrchestrator) Stop() {
+	if o.pool != nil {
+		o.pool.Stop()
+	}
+}
+
+// getProjectTaskContextCount returns the task context count from project config or default
+func (o *DBOSOrchestrator) getProjectTaskContextCount() int {
+	// Try to get from project config if available
+	if o.config != nil && o.config.ProjectDir != "" {
+		if projectCfg, err := project.Load(o.config.ProjectDir); err == nil {
+			return projectCfg.TaskContextCount
+		}
+	}
+	// Return default if no project config
+	return 5
+}
+
+// getProjectTaskContextMaxAge returns the task context max age from project config or default
+func (o *DBOSOrchestrator) getProjectTaskContextMaxAge() time.Duration {
+	// Try to get from project config if available
+	if o.config != nil && o.config.ProjectDir != "" {
+		if projectCfg, err := project.Load(o.config.ProjectDir); err == nil {
+			return projectCfg.TaskContextMaxAge
+		}
+	}
+	// Return default if no project config
+	return 24 * time.Hour
 }
