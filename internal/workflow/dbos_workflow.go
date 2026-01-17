@@ -18,6 +18,7 @@ import (
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/internal/git"
+	"github.com/cloud-shuttle/drover/internal/webhooks"
 	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
@@ -71,6 +72,7 @@ type DBOSOrchestrator struct {
 	verbose        bool
 	dependencyMap  map[string][]string // taskID -> list of dependent task IDs
 	dependencyMu   sync.RWMutex
+	webhooks       *webhooks.Manager // Webhook notification manager
 }
 
 // NewDBOSOrchestrator creates a new DBOS-based orchestrator
@@ -105,6 +107,12 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 		dbos.WithQueueBasePollingInterval(10*time.Millisecond), // Poll every 10ms for faster execution
 	)
 
+	// Create webhook manager
+	webhookMgr := cfg.CreateWebhookManager()
+	if cfg.WebhooksEnabled {
+		webhookMgr.Start(cfg.WebhookWorkers)
+	}
+
 	return &DBOSOrchestrator{
 		config:        cfg,
 		git:           gitMgr,
@@ -114,6 +122,7 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 		store:         store,
 		verbose:       cfg.Verbose,
 		dependencyMap: make(map[string][]string),
+		webhooks:      webhookMgr,
 	}, nil
 }
 
@@ -359,8 +368,18 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	// Broadcast task claimed to dashboard
 	dashboard.BroadcastTaskClaimed(task.TaskID, task.Title, "dbos-workflow")
 
+	// Emit webhook event
+	if o.webhooks != nil {
+		o.webhooks.EmitTaskClaimed(task.TaskID, task.Title, "dbos-workflow")
+	}
+
 	// Broadcast task started to dashboard
 	dashboard.BroadcastTaskStarted(task.TaskID, task.Title, "dbos-workflow")
+
+	// Emit webhook event
+	if o.webhooks != nil {
+		o.webhooks.EmitTaskStarted(task.TaskID, task.Title, "dbos-workflow")
+	}
 
 	// Create worktree for isolated execution (as a step)
 	worktreePath, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (string, error) {
@@ -371,6 +390,9 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		telemetry.RecordError(span, err, "WorktreeCreationError", telemetry.ErrorCategoryWorktree)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "worktree_error", 0)
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
+		if o.webhooks != nil {
+			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
+		}
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
@@ -383,6 +405,9 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		telemetry.RecordError(span, err, "ClaudeExecutionError", telemetry.ErrorCategoryAgent)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "agent_error", 0)
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
+		if o.webhooks != nil {
+			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
+		}
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
@@ -391,6 +416,9 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		telemetry.RecordError(span, claudeResult.Error, "ClaudeTaskFailed", telemetry.ErrorCategoryAgent)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "agent_error", claudeResult.Duration)
 		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
+		if o.webhooks != nil {
+			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
+		}
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
@@ -428,6 +456,11 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 
 	// Broadcast task completed to dashboard
 	dashboard.BroadcastTaskCompleted(task.TaskID, task.Title)
+
+	// Emit webhook event
+	if o.webhooks != nil {
+		o.webhooks.EmitTaskCompleted(task.TaskID, task.Title, duration.Milliseconds())
+	}
 
 	// Record task completion
 	telemetry.SetTaskStatus(span, "completed")

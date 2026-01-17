@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/modes"
+	"github.com/cloud-shuttle/drover/internal/webhooks"
 )
 
 // Config holds Drover configuration
@@ -59,6 +60,12 @@ type Config struct {
 
 	// Modes configuration (for planning/building separation)
 	Modes *modes.Config
+
+	// Webhook settings
+	WebhooksEnabled bool
+	WebhookURL      string
+	WebhookSecret   string
+	WebhookWorkers  int
 }
 
 // Load loads configuration from environment and defaults
@@ -85,6 +92,7 @@ func Load() (*Config, error) {
 		WorkerMode:      modes.ModeCombined, // Default to combined mode
 		RequireApproval: false,    // Default to no approval required
 		Modes:           modes.DefaultConfig(), // Default modes configuration
+		WebhookWorkers:  3,        // Default webhook delivery workers
 	}
 
 	// Environment overrides
@@ -151,6 +159,18 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DROVER_REFINEMENT_MAX_REFINEMENTS"); v != "" {
 		cfg.Modes.Refinement.MaxRefinements = parseIntOrDefault(v, 3)
+	}
+	if v := os.Getenv("DROVER_WEBHOOKS_ENABLED"); v != "" {
+		cfg.WebhooksEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_WEBHOOK_URL"); v != "" {
+		cfg.WebhookURL = v
+	}
+	if v := os.Getenv("DROVER_WEBHOOK_SECRET"); v != "" {
+		cfg.WebhookSecret = v
+	}
+	if v := os.Getenv("DROVER_WEBHOOK_WORKERS"); v != "" {
+		cfg.WebhookWorkers = parseIntOrDefault(v, 3)
 	}
 
 	// Resolve AgentPath based on AgentType if not explicitly set
@@ -261,4 +281,42 @@ func SetOperator(name string) error {
 	}
 
 	return nil
+}
+
+// CreateWebhookManager creates and configures a webhook manager from the config
+func (c *Config) CreateWebhookManager() *webhooks.Manager {
+	mgr := webhooks.NewManager()
+	if c.WebhookWorkers > 0 {
+		mgr.SetTimeout(30 * time.Second)
+	}
+
+	// Register webhook if configured
+	if c.WebhooksEnabled && c.WebhookURL != "" {
+		webhook := &webhooks.Webhook{
+			ID:     "default",
+			URL:    c.WebhookURL,
+			Secret: c.WebhookSecret,
+			Events: []webhooks.EventType{
+				webhooks.EventTaskCreated,
+				webhooks.EventTaskClaimed,
+				webhooks.EventTaskStarted,
+				webhooks.EventTaskPaused,
+				webhooks.EventTaskResumed,
+				webhooks.EventTaskBlocked,
+				webhooks.EventTaskCompleted,
+				webhooks.EventTaskFailed,
+				webhooks.EventWorkerStarted,
+				webhooks.EventWorkerStopped,
+			},
+			Enabled: true,
+		}
+		if err := mgr.Register(webhook); err != nil {
+			// Log error but don't fail - webhooks are optional
+			fmt.Printf("[config] warning: failed to register webhook: %v\n", err)
+		} else {
+			fmt.Printf("[config] webhooks enabled: %s\n", c.WebhookURL)
+		}
+	}
+
+	return mgr
 }

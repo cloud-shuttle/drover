@@ -21,6 +21,7 @@ import (
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/internal/git"
+	"github.com/cloud-shuttle/drover/internal/webhooks"
 	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
 )
@@ -36,6 +37,7 @@ type Orchestrator struct {
 	verbose  bool // Enable verbose logging
 	projectDir string // Project directory for beads sync
 	epicID   string // Optional epic filter for task execution
+	webhooks *webhooks.Manager // Webhook notification manager
 }
 
 // NewOrchestrator creates a new workflow orchestrator
@@ -79,6 +81,17 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 
 	agent.SetVerbose(cfg.Verbose)
 
+	// Create webhook manager
+	webhookMgr := cfg.CreateWebhookManager()
+	if cfg.WebhooksEnabled {
+		webhookMgr.Start(cfg.WebhookWorkers)
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = webhookMgr.Stop(ctx)
+		}()
+	}
+
 	// Check agent is installed
 	if err := agent.CheckInstalled(); err != nil {
 		if pool != nil {
@@ -96,6 +109,7 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 		workers:    cfg.Workers,
 		verbose:    cfg.Verbose,
 		projectDir: projectDir,
+		webhooks:   webhookMgr,
 	}, nil
 }
 
@@ -172,12 +186,19 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 func (o *Orchestrator) worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	workerID := fmt.Sprintf("worker-%d", id)
 	log.Printf("👷 Worker %d started", id)
+	if o.webhooks != nil {
+		o.webhooks.EmitWorkerStarted(workerID, id)
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
 			log.Printf("👷 Worker %d stopping (context cancelled)", id)
+			if o.webhooks != nil {
+				o.webhooks.EmitWorkerStopped(workerID, id, 0)
+			}
 			return
 		default:
 			// Try to claim a task (filtered by epic if set)
@@ -197,6 +218,11 @@ func (o *Orchestrator) worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 
 			// Broadcast task claimed to dashboard
 			dashboard.BroadcastTaskClaimed(task.ID, task.Title, workerID)
+
+			// Emit webhook event
+			if o.webhooks != nil {
+				o.webhooks.EmitTaskClaimed(task.ID, task.Title, workerID)
+			}
 
 			// Execute the task
 			o.executeTask(id, task)
@@ -243,6 +269,11 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 
 	// Broadcast task started to dashboard
 	dashboard.BroadcastTaskStarted(task.ID, task.Title, workerIDStr)
+
+	// Emit webhook event
+	if o.webhooks != nil {
+		o.webhooks.EmitTaskStarted(task.ID, task.Title, workerIDStr)
+	}
 
 	// Ensure task is always marked complete or failed, even if we panic
 	defer func() {
@@ -385,6 +416,11 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 
 	// Broadcast task completed to dashboard
 	dashboard.BroadcastTaskCompleted(task.ID, task.Title)
+
+	// Emit webhook event
+	if o.webhooks != nil {
+		o.webhooks.EmitTaskCompleted(task.ID, task.Title, duration.Milliseconds())
+	}
 
 	// Record task completion telemetry
 	telemetry.SetTaskStatus(taskSpan, "completed")
@@ -534,6 +570,9 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 		log.Printf("Error fetching task %s: %v", taskID, err)
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
 		dashboard.BroadcastTaskFailed(taskID, taskID, errorMsg)
+		if o.webhooks != nil {
+			o.webhooks.EmitTaskFailed(taskID, taskID, errorMsg, task.Attempts)
+		}
 		return false
 	}
 
@@ -542,6 +581,9 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
 		log.Printf("❌ Task %s failed after %d attempts", taskID, task.Attempts)
 		dashboard.BroadcastTaskFailed(task.ID, task.Title, errorMsg)
+		if o.webhooks != nil {
+			o.webhooks.EmitTaskFailed(task.ID, task.Title, errorMsg, task.Attempts)
+		}
 		return false
 	}
 
