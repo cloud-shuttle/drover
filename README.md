@@ -393,7 +393,11 @@ Drover is built on a pure Go stack:
 | Isolation | Git Worktrees | Parallel workspaces |
 | Observability | OpenTelemetry | Traces & metrics |
 
-See [DESIGN.md](./design/DESIGN.md) for detailed architecture documentation.
+**Documentation:**
+- [Documentation Index](./docs/index.md) - Complete documentation hub
+- [Design Docs](./design/DESIGN.md) - Detailed architecture documentation
+- [Spec Directory](./spec/) - Feature specifications
+- [Contributing](./CONTRIBUTING.md) - Contribution guidelines
 
 ## Comparison
 

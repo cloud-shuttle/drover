@@ -1,6 +1,13 @@
 # Drover Architecture Diagram
 
-## High-Level System Overview
+**Navigation:**
+- [Documentation Index](../docs/index.md) - Central documentation hub
+- [Durable Workflows Spec](../spec/durable-workflows.md) - Workflow engine specification
+- [Design Overview](./DESIGN.md) - Comprehensive design document
+- [State Machine](./state-machine.md) - Task state transitions
+- [Sequence Diagrams](./sequence.md) - Runtime flow
+
+---
 
 ```mermaid
 flowchart TB

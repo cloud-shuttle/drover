@@ -1,5 +1,12 @@
 # Contributing to Drover
 
+**Navigation:**
+- [Documentation Index](./docs/index.md) - Complete documentation hub
+- [Feature Specifications](./spec/) - Detailed feature specifications
+- [Design Documents](./design/) - Architecture and design decisions
+
+---
+
 Thank you for your interest in contributing to Drover! This document provides guidelines for contributing.
 
 ## Development Setup

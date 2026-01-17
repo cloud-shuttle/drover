@@ -1,6 +1,13 @@
 # Drover Design Document
 
-## Overview
+**Navigation:**
+- [Documentation Index](../docs/index.md) - Central documentation hub
+- [Feature Specifications](../spec/) - Detailed feature specs
+- [Architecture Diagrams](./architecture.md) - System architecture
+- [State Machine](./state-machine.md) - Task state transitions
+- [Sequence Diagrams](./sequence.md) - Runtime flow diagrams
+
+---
 
 Drover is a durable workflow orchestrator for parallel AI agent execution. It coordinates multiple Claude Code instances to complete project tasks while handling failures, dependencies, and resource contention.
 

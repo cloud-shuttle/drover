@@ -1,5 +1,13 @@
 # Task State Machine
 
+**Navigation:**
+- [Documentation Index](../docs/index.md) - Central documentation hub
+- [Design Overview](./DESIGN.md) - Comprehensive design document
+- [Architecture Diagrams](./architecture.md) - System architecture
+- [Sequence Diagrams](./sequence.md) - Runtime flow
+
+---
+
 ## State Transitions
 
 ```mermaid

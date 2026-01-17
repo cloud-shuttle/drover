@@ -1,5 +1,13 @@
 # Drover Runtime Flow
 
+**Navigation:**
+- [Documentation Index](../docs/index.md) - Central documentation hub
+- [Design Overview](./DESIGN.md) - Comprehensive design document
+- [Architecture Diagrams](./architecture.md) - System architecture
+- [State Machine](./state-machine.md) - Task state transitions
+
+---
+
 ## Main Execution Sequence
 
 ```mermaid
