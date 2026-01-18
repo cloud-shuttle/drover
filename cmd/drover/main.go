@@ -80,6 +80,7 @@ handles failures gracefully, and guarantees progress through crashes and restart
 		retryCmd(),
 		resolveCmd(),
 		streamCmd(),
+		specCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
