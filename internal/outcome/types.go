@@ -112,6 +112,11 @@ var defaultPassPatterns = []string{
 	`(?i)all tests passed`,
 	`(?i)implementation complete`,
 	`(?i)done`,
+	`(?i)finished`,
+	`(?i)complete`,
+	`(?i)built successfully`,
+	`(?i)ready`,
+	`(?i)completed`,
 }
 
 // defaultFailPatterns are patterns that indicate a failed outcome
@@ -165,6 +170,13 @@ func (p *Parser) ParseOutput(output string, exitCode int) *Outcome {
 
 	// Parse output for verdict indicators
 	outcome.Verdict = p.detectVerdict(output)
+
+	// If exit code is 0 and verdict is still unknown, default to pass
+	// This handles cases where the agent completes successfully without
+	// using explicit success/pass keywords
+	if exitCode == 0 && outcome.Verdict == VerdictUnknown {
+		outcome.Verdict = VerdictPass
+	}
 
 	// Extract summary and details
 	p.extractSummaryAndDetails(outcome, output)

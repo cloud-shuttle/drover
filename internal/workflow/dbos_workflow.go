@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -452,6 +453,11 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		"title":  task.Title,
 	})
 
+	// Update task status to in_progress in database
+	if err := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusInProgress, ""); err != nil {
+		log.Printf("⚠️  Error updating task status to in_progress: %v", err)
+	}
+
 	// Start analytics tracking
 	if o.analytics != nil {
 		o.analytics.StartTask(task.TaskID, task.Title, o.config.AgentType, "")
@@ -488,6 +494,10 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
 			"error": errMsg,
 		})
+		// Update task status to failed in database
+		if updateErr := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusFailed, errMsg); updateErr != nil {
+			log.Printf("⚠️  Error updating task status to failed: %v", updateErr)
+		}
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
@@ -509,6 +519,10 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
 			"error": errMsg,
 		})
+		// Update task status to failed in database
+		if updateErr := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusFailed, errMsg); updateErr != nil {
+			log.Printf("⚠️  Error updating task status to failed: %v", updateErr)
+		}
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
@@ -583,6 +597,10 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
 			"error": errMsg,
 		})
+		// Update task status to failed in database
+		if updateErr := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusFailed, errMsg); updateErr != nil {
+			log.Printf("⚠️  Error updating task status to failed: %v", updateErr)
+		}
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
@@ -612,6 +630,11 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	outcome := outcomepkg.ParseOutput(claudeResult.Output)
 	if err := o.store.SetTaskVerdict(task.TaskID, types.TaskVerdict(outcome.Verdict), outcome.Summary); err != nil {
 		log.Printf("Error storing verdict for task %s: %v", task.TaskID, err)
+	}
+
+	// Update task status to completed in database
+	if err := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusCompleted, ""); err != nil {
+		log.Printf("⚠️  Error updating task status to completed: %v", err)
 	}
 
 	// End analytics tracking
@@ -740,6 +763,36 @@ func (o *DBOSOrchestrator) createWorktreeStep(ctx context.Context, task TaskInpu
 // executeClaudeStep runs Claude Code in the worktree
 // This is a step function - must accept only context.Context
 func (o *DBOSOrchestrator) executeClaudeStep(ctx context.Context, worktreePath string, task TaskInput, parentSpan trace.Span) (*executor.ExecutionResult, error) {
+	// Validate worktree exists before executing
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		log.Printf("⚠️  Worktree %s no longer exists, attempting to recreate...", worktreePath)
+
+		// Clean up any stale registrations first
+		o.git.PruneStale(task.TaskID)
+
+		// Recreate the worktree
+		taskObj := &types.Task{
+			ID:       task.TaskID,
+			Title:    task.Title,
+			Priority: task.Priority,
+		}
+
+		var err error
+		if o.pool != nil && o.pool.IsEnabled() {
+			worktreePath, err = o.pool.Acquire(task.TaskID)
+			if err != nil {
+				return nil, fmt.Errorf("recreating worktree from pool: %w", err)
+			}
+		} else {
+			worktreePath, err = o.git.Create(taskObj)
+			if err != nil {
+				return nil, fmt.Errorf("recreating worktree: %w", err)
+			}
+		}
+
+		log.Printf("✅ Recreated worktree at %s", worktreePath)
+	}
+
 	result := o.agent.ExecuteWithContext(ctx, worktreePath, &types.Task{
 		ID:          task.TaskID,
 		Title:       task.Title,
