@@ -18,7 +18,14 @@
 # Don't exit on error - handle failures per-item
 # set -e
 
-DROVER="./drover"
+# Find drover binary - check DROVER_PATH env var, then PATH, then ./drover
+if [ -n "$DROVER_PATH" ]; then
+    DROVER="$DROVER_PATH"
+elif command -v drover &> /dev/null; then
+    DROVER="drover"
+else
+    DROVER="./drover"
+fi
 
 # Associative arrays to map external IDs to Drover IDs
 declare -A EPIC_IDS
@@ -46,6 +53,18 @@ if ! command -v jq &> /dev/null; then
     echo -e "${RED}Error: jq is required but not installed${NC}"
     echo "Install with: apt-get install jq  # Debian/Ubuntu"
     echo "            brew install jq        # macOS"
+    exit 1
+fi
+
+# Check if drover is available
+if ! $DROVER --help &> /dev/null; then
+    echo -e "${RED}Error: drover command not found${NC}"
+    echo "Looking for: $DROVER"
+    echo ""
+    echo "Fix by doing one of:"
+    echo "  1. Install drover: go install github.com/cloud-shuttle/drover/cmd/drover@latest"
+    echo "  2. Use DROVER_PATH: DROVER_PATH=../drover ./load-json.sh file.jsonl"
+    echo "  3. Run from the drover directory"
     exit 1
 fi
 
