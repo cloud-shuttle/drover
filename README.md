@@ -100,18 +100,19 @@ go install github.com/cloud-shuttle/drover/cmd/drover@latest
 | `drover worktree prune` | Clean up completed task worktrees |
 | `drover worktree prune -a` | Clean up all worktrees (incl. build artifacts) |
 | `drover import <file>` | Import tasks from a `.drover` export file |
+| `drover import-jsonl <file.jsonl>` | Import tasks from JSON Lines format |
 | `drover export [--format json]` | Export tasks to portable format |
 
 ### Bulk Task Creation
 
 For importing multiple tasks at once, Drover provides several options:
 
-#### 1. JSONL Import Script
+#### 1. JSONL Import (Native CLI)
 
-Use `load-json.sh` to import epics, stories, and tasks from JSON Lines format:
+Use `drover import-jsonl` to import epics, stories, and tasks from JSON Lines format:
 
 ```bash
-./load-json.sh examples/gather-project.jsonl
+drover import-jsonl tasks.jsonl
 ```
 
 JSONL format (one JSON object per line):
@@ -122,6 +123,10 @@ JSONL format (one JSON object per line):
 ```
 
 See `examples/gather-project.jsonl` for a complete example.
+
+**Priority values:**
+- Integer: 1-10 (higher = more urgent)
+- String: "critical" (10), "high" (7), "normal" (5), "low" (2)
 
 #### 2. AI-Powered Task Generation
 
