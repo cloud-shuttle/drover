@@ -53,6 +53,12 @@ type Config struct {
 	BackpressureMaxBackoff         time.Duration // maximum backoff duration
 	BackpressureSlowThreshold      time.Duration // response time considered slow
 
+	// Memory-aware backpressure settings (drover-mem-6)
+	BackpressureMemoryAwareEnabled bool   // enable memory-aware spawning
+	BackpressureMemoryThresholdMB  int64  // minimum available MB before throttling
+	BackpressureMemoryCriticalMB   int64  // critical memory threshold - stop spawning
+	BackpressureWorkerRSSLimitMB   int64  // per-worker RSS limit in MB
+
 	// Worker mode settings (for planning/building separation)
 	WorkerMode    modes.WorkerMode // "combined", "planning", or "building"
 	RequireApproval bool             // require manual approval for plans
@@ -119,6 +125,10 @@ func Load() (*Config, error) {
 		BackpressureRateLimitBackoff:   30 * time.Second, // Initial backoff
 		BackpressureMaxBackoff:         5 * time.Minute,  // Max backoff
 		BackpressureSlowThreshold:      10 * time.Second, // Slow threshold
+		BackpressureMemoryAwareEnabled: true,   // Memory-aware spawning enabled by default
+		BackpressureMemoryThresholdMB:  1024,   // Throttle if less than 1GB available
+		BackpressureMemoryCriticalMB:   512,    // Stop spawning if less than 512MB available
+		BackpressureWorkerRSSLimitMB:   2048,   // Each worker limited to 2GB RSS
 		WorkerMode:      modes.ModeCombined, // Default to combined mode
 		RequireApproval: false,    // Default to no approval required
 		Modes:           modes.DefaultConfig(), // Default modes configuration
@@ -197,6 +207,19 @@ func Load() (*Config, error) {
 	if v := os.Getenv("DROVER_BACKPRESSURE_SLOW_THRESHOLD"); v != "" {
 		cfg.BackpressureSlowThreshold = parseDurationOrDefault(v, 10*time.Second)
 	}
+	// Memory-aware backpressure settings (drover-mem-6)
+	if v := os.Getenv("DROVER_BACKPRESSURE_MEMORY_AWARE_ENABLED"); v != "" {
+		cfg.BackpressureMemoryAwareEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_BACKPRESSURE_MEMORY_THRESHOLD_MB"); v != "" {
+		cfg.BackpressureMemoryThresholdMB = parseInt64OrDefault(v, 1024)
+	}
+	if v := os.Getenv("DROVER_BACKPRESSURE_MEMORY_CRITICAL_MB"); v != "" {
+		cfg.BackpressureMemoryCriticalMB = parseInt64OrDefault(v, 512)
+	}
+	if v := os.Getenv("DROVER_BACKPRESSURE_WORKER_RSS_LIMIT_MB"); v != "" {
+		cfg.BackpressureWorkerRSSLimitMB = parseInt64OrDefault(v, 2048)
+	}
 	if v := os.Getenv("DROVER_REQUIRE_APPROVAL"); v != "" {
 		cfg.RequireApproval = v == "true" || v == "1"
 	}
@@ -271,6 +294,14 @@ func defaultDatabaseURL() string {
 
 func parseIntOrDefault(s string, def int) int {
 	var i int
+	if _, err := fmt.Sscanf(s, "%d", &i); err != nil {
+		return def
+	}
+	return i
+}
+
+func parseInt64OrDefault(s string, def int64) int64 {
+	var i int64
 	if _, err := fmt.Sscanf(s, "%d", &i); err != nil {
 		return def
 	}

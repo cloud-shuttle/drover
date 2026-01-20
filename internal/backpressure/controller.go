@@ -5,6 +5,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/cloud-shuttle/drover/internal/memory"
 )
 
 // WorkerSignal represents downstream health signals from workers
@@ -45,6 +47,12 @@ type ControllerConfig struct {
 	MaxBackoff         time.Duration // Maximum backoff duration
 	SlowThreshold      time.Duration // Response time considered slow
 	SlowCountThreshold int           // Consecutive slow responses before reducing
+
+	// Memory-aware settings (drover-mem-6)
+	MemoryAwareEnabled    bool  // Enable memory-aware spawning
+	MemoryThresholdMB     int64 // Minimum available MB before throttling
+	MemoryCriticalMB      int64 // Critical memory threshold - stop spawning
+	WorkerRSSLimitMB      int64 // Per-worker RSS limit in MB
 }
 
 // DefaultControllerConfig returns default backpressure controller configuration
@@ -57,6 +65,12 @@ func DefaultControllerConfig() ControllerConfig {
 		MaxBackoff:         5 * time.Minute,
 		SlowThreshold:      10 * time.Second,
 		SlowCountThreshold: 3,
+
+		// Memory-aware defaults
+		MemoryAwareEnabled:   true,
+		MemoryThresholdMB:    1024,  // Throttle if less than 1GB available
+		MemoryCriticalMB:     512,   // Stop spawning if less than 512MB available
+		WorkerRSSLimitMB:     2048,  // Each worker limited to 2GB RSS
 	}
 }
 
@@ -183,7 +197,35 @@ func (c *Controller) CanSpawn() bool {
 	}
 
 	// Check if we're at concurrency limit
-	return c.currentInFlight < c.maxInFlight
+	if c.currentInFlight >= c.maxInFlight {
+		return false
+	}
+
+	// Memory-aware spawning (drover-mem-6)
+	if c.config.MemoryAwareEnabled {
+		// Check system memory availability
+		if sysMem, err := memory.GetSystemMemory(); err == nil {
+			// Critical memory threshold - stop spawning
+			if sysMem.AvailableMB < c.config.MemoryCriticalMB {
+				log.Printf("[backpressure] critical memory: %dMB available < %dMB threshold, stopping spawns",
+					sysMem.AvailableMB, c.config.MemoryCriticalMB)
+				return false
+			}
+
+			// Memory threshold - consider throttling
+			if sysMem.AvailableMB < c.config.MemoryThresholdMB {
+				// Only allow spawn if we have significant headroom
+				estimatedUsageMB := int64(c.currentInFlight) * c.config.WorkerRSSLimitMB
+				if estimatedUsageMB > sysMem.AvailableMB-c.config.MemoryCriticalMB {
+					log.Printf("[backpressure] memory constrained: %dMB available, %dMB estimated usage, throttling",
+						sysMem.AvailableMB, estimatedUsageMB)
+					return false
+				}
+			}
+		}
+	}
+
+	return true
 }
 
 // WorkerStarted increments the in-flight counter

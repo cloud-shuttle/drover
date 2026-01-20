@@ -25,6 +25,11 @@ type ExecutionResult struct {
 	Error    error
 	Duration time.Duration
 	Signal   worker.WorkerSignal // Worker signal for backpressure control
+
+	// Memory metrics for drover-mem-6
+	WorkerPID    int   `json:"worker_pid,omitempty"`    // PID of the worker process
+	PeakRSSBytes int64 `json:"peak_rss_bytes,omitempty"` // Peak RSS during execution
+	FinalRSSBytes int64 `json:"final_rss_bytes,omitempty"` // Final RSS at completion
 }
 
 // Executor runs tasks using Claude Code

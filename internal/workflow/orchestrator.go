@@ -155,11 +155,21 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 			MaxBackoff:         cfg.BackpressureMaxBackoff,
 			SlowThreshold:      cfg.BackpressureSlowThreshold,
 			SlowCountThreshold: 3,
+
+			// Memory-aware settings (drover-mem-6)
+			MemoryAwareEnabled:   cfg.BackpressureMemoryAwareEnabled,
+			MemoryThresholdMB:    cfg.BackpressureMemoryThresholdMB,
+			MemoryCriticalMB:     cfg.BackpressureMemoryCriticalMB,
+			WorkerRSSLimitMB:     cfg.BackpressureWorkerRSSLimitMB,
 		}
 		backpressureCtrl = backpressure.NewController(backpressureCfg)
 		if cfg.Verbose {
 			log.Printf("[backpressure] enabled with initial concurrency: %d, max: %d",
 				backpressureCfg.InitialConcurrency, backpressureCfg.MaxConcurrency)
+			if backpressureCfg.MemoryAwareEnabled {
+				log.Printf("[backpressure] memory-aware: threshold=%dMB, critical=%dMB, worker_limit=%dMB",
+					backpressureCfg.MemoryThresholdMB, backpressureCfg.MemoryCriticalMB, backpressureCfg.WorkerRSSLimitMB)
+			}
 		}
 	}
 

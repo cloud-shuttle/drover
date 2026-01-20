@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/backpressure"
+	"github.com/cloud-shuttle/drover/internal/memory"
 	ctxmngr "github.com/cloud-shuttle/drover/internal/context"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"go.opentelemetry.io/otel/trace"
@@ -130,9 +132,48 @@ func (a *WorkerAgent) ExecuteWithContext(ctx context.Context, worktreePath strin
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = io.MultiWriter(os.Stderr, &stderrBuf)
 
-	// Run the worker
-	err = cmd.Run()
+	// Start the worker process
+	if err := cmd.Start(); err != nil {
+		return &ExecutionResult{
+			Success: false,
+			Output:  "",
+			Error:   fmt.Errorf("failed to start worker: %w", err),
+			Duration: time.Since(start),
+		}
+	}
+
+	workerPID := cmd.Process.Pid
+
+	// Start memory sampling goroutine
+	memSampleDone := make(chan struct{})
+	var peakRSS int64
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-memSampleDone:
+				return
+			case <-ticker.C:
+				if mem, err := memory.GetProcessMemory(workerPID); err == nil {
+					if mem.RSSBytes > peakRSS {
+						peakRSS = mem.RSSBytes
+					}
+				}
+			}
+		}
+	}()
+
+	// Wait for the worker to complete
+	err = cmd.Wait()
 	duration := time.Since(start)
+	close(memSampleDone) // Stop memory sampling
+
+	// Get final memory reading
+	var finalRSS int64
+	if mem, err := memory.GetProcessMemory(workerPID); err == nil {
+		finalRSS = mem.RSSBytes
+	}
 
 	// Parse result from stdout
 	var result struct {
@@ -154,28 +195,43 @@ func (a *WorkerAgent) ExecuteWithContext(ctx context.Context, worktreePath strin
 			errMsg += ": " + stderrBuf.String()
 		}
 		return &ExecutionResult{
-			Success: false,
-			Output:  stderrBuf.String(),
-			Error:   fmt.Errorf("worker failed: %w", err),
-			Duration: duration,
+			Success:       false,
+			Output:        stderrBuf.String(),
+			Error:         fmt.Errorf("worker failed: %w", err),
+			Duration:      duration,
+			WorkerPID:     workerPID,
+			PeakRSSBytes:  peakRSS,
+			FinalRSSBytes: finalRSS,
 		}
 	}
 
 	if err := json.Unmarshal([]byte(resultJSON), &result); err != nil {
 		return &ExecutionResult{
-			Success: false,
-			Output:  resultJSON,
-			Error:   fmt.Errorf("failed to parse worker result: %w", err),
-			Duration: duration,
+			Success:       false,
+			Output:        resultJSON,
+			Error:         fmt.Errorf("failed to parse worker result: %w", err),
+			Duration:      duration,
+			WorkerPID:     workerPID,
+			PeakRSSBytes:  peakRSS,
+			FinalRSSBytes: finalRSS,
 		}
+	}
+
+	// Log memory usage if verbose
+	if a.verbose && (peakRSS > 0 || finalRSS > 0) {
+		log.Printf("[memory] worker %d: peak=%s, final=%s",
+			workerPID, memory.FormatBytes(peakRSS), memory.FormatBytes(finalRSS))
 	}
 
 	// Return execution result
 	execResult := &ExecutionResult{
-		Success:  result.Success,
-		Output:   result.Output,
-		Duration: duration,
-		Signal:   backpressure.WorkerSignal(result.Signal), // Populate signal from worker result
+		Success:       result.Success,
+		Output:        result.Output,
+		Duration:      duration,
+		Signal:        backpressure.WorkerSignal(result.Signal), // Populate signal from worker result
+		WorkerPID:     workerPID,
+		PeakRSSBytes:  peakRSS,
+		FinalRSSBytes: finalRSS,
 	}
 
 	if !result.Success {
