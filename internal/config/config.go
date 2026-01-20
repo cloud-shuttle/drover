@@ -92,6 +92,13 @@ type Config struct {
 	AnalyticsEnabled  bool
 	AnalyticsConfig   string
 	AnalyticsMaxMetrics int
+
+	// File-based task mailbox (drover-mem-4)
+	MailboxEnabled           bool   // enable file-based task queue
+	MailboxDir               string // directory path for mailbox
+	MailboxOutboxRetention   int    // days to keep completed tasks
+	MailboxFailedRetention   int    // days to keep failed tasks
+	MailboxOrphanScanMinutes int    // minutes between orphan scans
 }
 
 // Load loads configuration from environment and defaults
@@ -134,6 +141,13 @@ func Load() (*Config, error) {
 		Modes:           modes.DefaultConfig(), // Default modes configuration
 		WebhookWorkers:  3,        // Default webhook delivery workers
 		AnalyticsMaxMetrics: 10000, // Default max metrics in memory
+
+		// File-based mailbox defaults
+		MailboxEnabled:           false, // File mailbox disabled by default
+		MailboxDir:               "/tmp/drover/mailbox",
+		MailboxOutboxRetention:   7,    // 7 days
+		MailboxFailedRetention:   30,   // 30 days
+		MailboxOrphanScanMinutes: 5,    // 5 minutes
 	}
 
 	// Environment overrides
@@ -267,6 +281,23 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DROVER_ANALYTICS_MAX_METRICS"); v != "" {
 		cfg.AnalyticsMaxMetrics = parseIntOrDefault(v, 10000)
+	}
+
+	// File-based mailbox configuration (drover-mem-4)
+	if v := os.Getenv("DROVER_MAILBOX_ENABLED"); v != "" {
+		cfg.MailboxEnabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_MAILBOX_DIR"); v != "" {
+		cfg.MailboxDir = v
+	}
+	if v := os.Getenv("DROVER_MAILBOX_OUTBOX_RETENTION"); v != "" {
+		cfg.MailboxOutboxRetention = parseIntOrDefault(v, 7)
+	}
+	if v := os.Getenv("DROVER_MAILBOX_FAILED_RETENTION"); v != "" {
+		cfg.MailboxFailedRetention = parseIntOrDefault(v, 30)
+	}
+	if v := os.Getenv("DROVER_MAILBOX_ORPHAN_SCAN_MINUTES"); v != "" {
+		cfg.MailboxOrphanScanMinutes = parseIntOrDefault(v, 5)
 	}
 
 	// Resolve AgentPath based on AgentType if not explicitly set
