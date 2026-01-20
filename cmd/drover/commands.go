@@ -3380,3 +3380,75 @@ func printEvent(event map[string]any) {
 
 	fmt.Println()
 }
+
+// flagsCmd manages feature flags
+func flagsCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "flags",
+		Short: "Manage feature flags",
+		Long:  `Manage feature flags for experimental features.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Feature flags management is coming soon.")
+			fmt.Println("This will allow enabling/disabling experimental features.")
+			return nil
+		},
+	}
+	return command
+}
+
+// searchCmd performs full-text search across tasks
+func searchCmd() *cobra.Command {
+	var query string
+
+	command := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Full-text search across tasks and outputs",
+		Long:  `Search across task titles, descriptions, and execution outputs.`,
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			query = args[0]
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			// For now, just show a placeholder
+			fmt.Printf("Searching for: %s\n", query)
+			fmt.Println("Full-text search will be implemented in a future update.")
+			return nil
+		},
+	}
+	return command
+}
+
+// backpressureCmd manages backpressure validation checks
+func backpressureCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "backpressure",
+		Short: "Manage backpressure validation checks",
+		Long: `Configure and monitor backpressure settings for adaptive concurrency control.
+
+This helps prevent OOM by reducing worker spawning when Claude API is rate-limited.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Backpressure management is coming soon.")
+			fmt.Println("This will be part of the memory management improvements.")
+			return nil
+		},
+	}
+	return command
+}
+
+// proxyCmd manages the LLM proxy server
+func proxyCmd() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "proxy",
+		Short: "Manage the LLM proxy server",
+		Long:  `Configure and manage the proxy server for LLM API requests.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Println("Proxy server management is coming soon.")
+			return nil
+		},
+	}
+	return command
+}

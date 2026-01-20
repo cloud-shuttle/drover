@@ -126,12 +126,23 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 	projectCfg.MergeWithGlobal(cfg.AgentType, cfg.Workers, cfg.TaskTimeout, cfg.MaxTaskAttempts)
 
 	// Create the agent based on configuration with project guidelines
+	agentType := projectCfg.Agent
+	// Use worker subprocess if configured for process isolation
+	if cfg.UseWorkerSubprocess {
+		agentType = "worker"
+		if cfg.Verbose {
+			log.Printf("[worker] using drover-worker subprocess for process isolation")
+		}
+	}
+
 	agent, err := executor.NewAgent(&executor.AgentConfig{
-		Type:              projectCfg.Agent,
+		Type:              agentType,
 		Path:              cfg.AgentPath,
 		Timeout:           projectCfg.TaskTimeout,
 		Verbose:           cfg.Verbose,
 		ProjectGuidelines: projectCfg.GetGuidelines(),
+		WorkerBinary:      cfg.WorkerBinary,
+		WorkerMemoryLimit: cfg.WorkerMemoryLimit,
 		ContextThresholds: &ctxmngr.ContentThresholds{
 			MaxDescriptionSize: projectCfg.MaxDescriptionSize,
 			MaxDiffSize:       projectCfg.MaxDiffSize,

@@ -39,6 +39,11 @@ type Config struct {
 	AgentPath  string  // path to agent binary
 	ClaudePath string  // deprecated: use AgentPath instead
 
+	// Process-isolated worker settings (for OOM prevention)
+	UseWorkerSubprocess bool   // use drover-worker for process isolation
+	WorkerBinary        string // path to drover-worker binary (default: "drover-worker")
+	WorkerMemoryLimit   string // memory limit for worker processes (e.g., "512M", "2G")
+
 	// Worker mode settings (for planning/building separation)
 	WorkerMode    modes.WorkerMode // "combined", "planning", or "building"
 	RequireApproval bool             // require manual approval for plans
@@ -95,6 +100,9 @@ func Load() (*Config, error) {
 		PoolMaxSize:     10,       // Maximum pooled worktrees
 		PoolWarmup:      5 * time.Minute,
 		PoolCleanupOnExit: true,   // Clean up pooled worktrees on exit
+		UseWorkerSubprocess: false, // Process-isolated workers disabled by default
+		WorkerBinary:        "drover-worker",
+		WorkerMemoryLimit:   "",  // No memory limit by default
 		WorkerMode:      modes.ModeCombined, // Default to combined mode
 		RequireApproval: false,    // Default to no approval required
 		Modes:           modes.DefaultConfig(), // Default modes configuration
@@ -139,6 +147,15 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("DROVER_POOL_CLEANUP_ON_EXIT"); v != "" {
 		cfg.PoolCleanupOnExit = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_USE_WORKER_SUBPROCESS"); v != "" {
+		cfg.UseWorkerSubprocess = v == "true" || v == "1"
+	}
+	if v := os.Getenv("DROVER_WORKER_BINARY"); v != "" {
+		cfg.WorkerBinary = v
+	}
+	if v := os.Getenv("DROVER_WORKER_MEMORY_LIMIT"); v != "" {
+		cfg.WorkerMemoryLimit = v
 	}
 	if v := os.Getenv("DROVER_WORKER_MODE"); v != "" {
 		cfg.WorkerMode = modes.WorkerMode(v)

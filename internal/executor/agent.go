@@ -33,7 +33,7 @@ type Agent interface {
 
 // AgentConfig contains configuration for creating an agent
 type AgentConfig struct {
-	// Type is the agent type: "claude", "codex", "amp", or "opencode"
+	// Type is the agent type: "claude", "codex", "amp", "opencode", or "worker"
 	Type string
 
 	// Path is the path to the agent binary (for claude/codex/amp CLIs)
@@ -50,6 +50,12 @@ type AgentConfig struct {
 
 	// ContextThresholds defines size limits for content types
 	ContextThresholds *ctxmngr.ContentThresholds
+
+	// WorkerBinary is the path to drover-worker binary (for type="worker")
+	WorkerBinary string
+
+	// WorkerMemoryLimit is the memory limit for worker processes (for type="worker")
+	WorkerMemoryLimit string
 }
 
 // NewAgent creates a new Agent based on the provided configuration
@@ -57,6 +63,17 @@ func NewAgent(cfg *AgentConfig) (Agent, error) {
 	var agent Agent
 
 	switch cfg.Type {
+	case "worker":
+		// Use drover-worker subprocess for process isolation
+		workerPath := cfg.WorkerBinary
+		if workerPath == "" {
+			workerPath = "drover-worker"
+		}
+		agent = NewWorkerAgent(workerPath, cfg.Path, cfg.Timeout)
+		// Set memory limit if provided
+		if wa, ok := agent.(*WorkerAgent); ok && cfg.WorkerMemoryLimit != "" {
+			wa.SetMemoryLimit(cfg.WorkerMemoryLimit)
+		}
 	case "claude":
 		agent = NewClaudeAgent(cfg.Path, cfg.Timeout)
 	case "codex":
