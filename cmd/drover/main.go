@@ -44,7 +44,7 @@ func main() {
 		Long: `Drover is a durable workflow orchestrator that runs multiple Claude Code
 agents in parallel to complete your entire project. It manages task dependencies,
 handles failures gracefully, and guarantees progress through crashes and restarts.`,
-		Version: "0.1.0",
+		Version: "0.3.0",
 	}
 
 	rootCmd.AddCommand(

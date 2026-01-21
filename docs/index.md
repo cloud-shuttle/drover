@@ -49,6 +49,8 @@ Welcome to the Drover documentation. This page serves as the central hub for all
 | **Backpressure** | [Flow Control](#backpressure) | ✅ Implemented |
 | **Code Search** | [Semantic Code Search](#code-search) | ✅ Implemented |
 | **Plan Review TUI** | [Interactive Plan Review](#plan-review-tui) | ✅ Implemented |
+| **Conversation Persistence** | [FTS5 Conversation History](#conversation-persistence) | ✅ Implemented |
+| **File-Based Task Mailbox** | [Crash-Resilient Task Queue](#file-based-task-mailbox) | ✅ Implemented |
 
 ### Proposed Features
 
@@ -74,6 +76,7 @@ Welcome to the Drover documentation. This page serves as the central hub for all
 | [Project Planning](./PROJECT_PLANNING.md) | Plan epics and tasks with Claude |
 | [CLI Reference](#cli-reference) | Complete command reference |
 | [Configuration](#configuration) | Environment variables and options |
+| [Conversation Search](./conversation-search-guide.md) | FTS5 full-text search queries |
 | [Observability](../scripts/telemetry/README.md) | OpenTelemetry setup and dashboards |
 
 ---
@@ -297,6 +300,66 @@ Terminal UI for reviewing and approving implementation plans.
 ```bash
 drover plan review
 ```
+
+---
+
+### Conversation Persistence
+
+**Status:** ✅ Implemented | **Since:** v0.3.0 (drover-mem-8)
+
+Full conversation history persistence with FTS5 full-text search.
+
+**Key Features:**
+- SQLite storage with FTS5 indexing
+- BM25 ranking for relevance scoring
+- Token-aware context building
+- Boolean and phrase search queries
+- Search by role, tool, or content
+
+**Usage:**
+```bash
+# Search conversation history
+sqlite3 .drover/drover.db \
+  "SELECT ct.role, substr(ct.content, 1, 100) \
+   FROM conversation_turns_fts fts \
+   INNER JOIN conversation_turns ct ON ct.rowid = fts.rowid \
+   WHERE conversation_turns_fts MATCH 'search term' LIMIT 10;"
+```
+
+**See Also:** [Conversation Search Guide](./conversation-search-guide.md), [Internal Conversation Store](../internal/conversation/store.go)
+
+---
+
+### File-Based Task Mailbox
+
+**Status:** ✅ Implemented | **Since:** v0.3.0 (drover-mem-4)
+
+Crash-resilient file-based task queue using POSIX atomic operations.
+
+**Key Features:**
+- Atomic task enqueue with temp file + rename
+- POSIX rename() for race-free claims
+- Orphan recovery for stale tasks
+- Automatic cleanup of old files
+- Worker-safe concurrent access
+
+**Configuration:**
+```bash
+export DROVER_MAILBOX_ENABLED=true
+export DROVER_MAILBOX_DIR=/var/lib/drover/mailbox
+```
+
+**Directory Layout:**
+```
+mailbox/
+├── inbox/      # New tasks ready to be claimed
+├── processing/ # Tasks currently being worked on
+├── outbox/     # Completed tasks (retained N days)
+├── failed/     # Failed tasks (retained N days)
+└── tmp/        # Temporary files for atomic writes
+```
+
+**See Also:** [Mailbox Design](../internal/mailbox/DESIGN.md), [Internal Mailbox](../internal/mailbox/types.go)
 
 ---
 
