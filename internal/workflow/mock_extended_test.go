@@ -21,8 +21,8 @@ func TestMockDBOSContext_WithParent(t *testing.T) {
 	if mock.Context != parent {
 		t.Error("expected parent context to be preserved")
 	}
-	if mock.ApplicationID() != "drover-test-mock" {
-		t.Errorf("unexpected application ID: %s", mock.ApplicationID())
+	if mock.applicationID != "drover-test-mock" {
+		t.Errorf("unexpected application ID: %s", mock.applicationID)
 	}
 }
 
@@ -208,7 +208,7 @@ func TestMockDBOSContext_SetEvent(t *testing.T) {
 
 func TestMockDBOSContext_GetEvent(t *testing.T) {
 	mock := NewMockDBOSContext()
-	result, err := mock.GetEvent(mock, "key", time.Second)
+	result, err := mock.GetEvent(mock, "workflow-1", "key", time.Second)
 	if err != nil || result != nil {
 		t.Errorf("GetEvent should return nil, nil: %v, %v", result, err)
 	}
@@ -493,13 +493,15 @@ func TestTaskResult_FailureFields(t *testing.T) {
 
 func TestQueueStats_Computation(t *testing.T) {
 	s := QueueStats{
-		Completed: 7,
-		Failed:    2,
-		Remaining: 1,
-		Elapsed:   10 * time.Second,
+		TotalEnqueued: 10,
+		Completed:     7,
+		Failed:        2,
+		Duration:      10 * time.Second,
 	}
-	total := s.Completed + s.Failed + s.Remaining
-	if total != 10 {
-		t.Errorf("expected 10 total, got %d", total)
+	if s.TotalEnqueued != s.Completed+s.Failed+1 {
+		t.Errorf("expected TotalEnqueued 10 = 7+2+1, got %d", s.TotalEnqueued)
+	}
+	if s.Duration != 10*time.Second {
+		t.Errorf("unexpected duration: %v", s.Duration)
 	}
 }
