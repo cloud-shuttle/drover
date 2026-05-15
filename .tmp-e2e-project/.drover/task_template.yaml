@@ -1,0 +1,30 @@
+# Drover Task Template
+# Use this template to create high-quality, actionable tasks
+
+title: "Specific Component/Feature Name - Action Verb"
+description: |
+  Detailed description of what needs to be done.
+
+  Include:
+  - Target files/packages (e.g., packages/components/src/button/)
+  - Specific action (create/update/fix/test/refactor)
+  - Technical details (function names, feature flags, file paths)
+  - Acceptance criteria (how to verify it works)
+
+# Example good tasks:
+
+# Example 1: Specific component update
+title: "Add New York variant to Button component"
+description: |
+  Create packages/components/src/button/new_york.rs with:
+  - New York theme styling (smaller border-radius, muted colors)
+  - Same props API as default variant
+  - Consistent with other New York variants
+  Tests in packages/components/src/button/new_york_tests.rs
+
+# Quality Checklist:
+# [ ] Title starts with action verb (Create, Fix, Add, Update, Implement)
+# [ ] Description mentions specific files/packages
+# [ ] Description includes acceptance criteria
+# [ ] Technical details provided (function names, feature flags)
+# [ ] Context is clear (why this is needed, what problem it solves)

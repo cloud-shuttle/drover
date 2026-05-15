@@ -22,6 +22,7 @@ import (
 	"github.com/cloud-shuttle/drover/internal/analytics"
 	"github.com/cloud-shuttle/drover/internal/backpressure"
 	"github.com/cloud-shuttle/drover/internal/beads"
+	"github.com/cloud-shuttle/drover/internal/clock"
 	"github.com/cloud-shuttle/drover/internal/config"
 	ctxmngr "github.com/cloud-shuttle/drover/internal/context"
 	"github.com/cloud-shuttle/drover/internal/dashboard"
@@ -40,12 +41,25 @@ import (
 )
 
 // Orchestrator manages the main execution loop
+// GitManager abstracts git worktree operations for testability.
+type GitManager interface {
+	Create(task *types.Task) (string, error)
+	Commit(taskID string, commitMsg string) (bool, error)
+	MergeToMain(taskID string) error
+	Remove(taskID string) error
+	Cleanup() error
+	SetVerbose(verbose bool)
+	PruneStale(taskID string)
+	GetWorktreePath(taskID string) (string, error)
+}
+
 type Orchestrator struct {
 	config        *config.Config
 	store         *db.Store
-	git           *git.WorktreeManager
+	git           GitManager
 	pool          *git.WorktreePool // Worktree pool for pre-warming
 	agent         executor.Agent // Agent interface for Claude/Codex/Amp
+	clock         clock.Clock // Mockable clock for deterministic testing
 	workers       int
 	verbose       bool // Enable verbose logging
 	projectDir    string // Project directory for beads sync
@@ -187,6 +201,7 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 		git:          gitMgr,
 		pool:         pool,
 		agent:        agent,
+		clock:        clock.RealClock{},
 		workers:      cfg.Workers,
 		verbose:      cfg.Verbose,
 		projectDir:   projectDir,

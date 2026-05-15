@@ -13,9 +13,11 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/analytics"
+	"github.com/cloud-shuttle/drover/internal/clock"
 	"github.com/cloud-shuttle/drover/internal/config"
 	ctxmngr "github.com/cloud-shuttle/drover/internal/context"
 	"github.com/cloud-shuttle/drover/internal/dashboard"
@@ -73,9 +75,10 @@ type QueueStats struct {
 // DBOSOrchestrator manages workflow execution using DBOS
 type DBOSOrchestrator struct {
 	config         *config.Config
-	git            *git.WorktreeManager
+	git            GitManager
 	pool           *git.WorktreePool // Worktree pool for pre-warming
 	agent          executor.Agent // Agent interface for Claude/Codex/Amp
+	clock          clock.Clock // Mockable clock for deterministic testing
 	dbosCtx        dbos.DBOSContext
 	queue          dbos.WorkflowQueue
 	store          *db.Store // SQLite store for worktree tracking
@@ -189,6 +192,7 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 		git:           gitMgr,
 		pool:          pool,
 		agent:         agent,
+		clock:         clock.RealClock{},
 		dbosCtx:       dbosCtx,
 		queue:         queue,
 		store:         store,
@@ -922,9 +926,15 @@ func (o *DBOSOrchestrator) PrintQueueStats(stats QueueStats) {
 	}
 }
 
-// generateWorkflowID generates a unique workflow ID for telemetry
+// workflowIDCounter provides a monotonic counter to guarantee unique workflow IDs
+// even when multiple IDs are generated within the same nanosecond.
+var workflowIDCounter atomic.Int64
+
+// generateWorkflowID generates a unique workflow ID for telemetry.
+// Uses timestamp + atomic counter to prevent collisions under concurrent access.
 func generateWorkflowID() string {
-	return fmt.Sprintf("workflow-%d", time.Now().UnixNano())
+	seq := workflowIDCounter.Add(1)
+	return fmt.Sprintf("workflow-%d-%d", time.Now().UnixNano(), seq)
 }
 
 // runTestsDBOS executes automated tests before task completion in DBOS workflow
