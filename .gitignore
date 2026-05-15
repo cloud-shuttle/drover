@@ -52,3 +52,12 @@ Thumbs.db
 debug.txt
 work-task-*.txt
 .release/
+
+# Common Binaries
+server
+drover
+drover-*
+*.exe
+*.test
+.DS_Store
+.env

@@ -20,6 +20,7 @@ import (
 	"github.com/cloud-shuttle/drover/internal/template"
 	"github.com/cloud-shuttle/drover/internal/workflow"
 	"github.com/cloud-shuttle/drover/pkg/types"
+	"github.com/cloud-shuttle/drover-libs/pkg/clock"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/spf13/cobra"
 )
@@ -202,7 +203,7 @@ func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, store *db.Store, pro
 	}
 
 	// Create DBOS orchestrator (this creates the queue before Launch)
-	orch, err := workflow.NewDBOSOrchestrator(runCfg, dbosCtx, projectDir, store)
+	orch, err := workflow.NewDBOSOrchestrator(runCfg, dbosCtx, projectDir, store, clock.RealClock{})
 	if err != nil {
 		return fmt.Errorf("creating DBOS orchestrator: %w", err)
 	}
@@ -263,7 +264,7 @@ func runWithSQLite(cmd *cobra.Command, runCfg *config.Config, store *db.Store, p
 	fmt.Println("🐂 Using SQLite-based orchestrator (local mode)")
 
 	// Create orchestrator
-	orch, err := workflow.NewOrchestrator(runCfg, store, projectDir)
+	orch, err := workflow.NewOrchestrator(runCfg, store, projectDir, clock.RealClock{})
 	if err != nil {
 		return fmt.Errorf("creating orchestrator: %w", err)
 	}

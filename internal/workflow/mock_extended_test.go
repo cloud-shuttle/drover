@@ -505,3 +505,195 @@ func TestQueueStats_Computation(t *testing.T) {
 		t.Errorf("unexpected duration: %v", s.Duration)
 	}
 }
+
+// ============================================================================
+// Mock context — stream stubs (all at 0%)
+// ============================================================================
+
+func TestMockDBOSContext_WriteStream(t *testing.T) {
+	mock := NewMockDBOSContext()
+	err := mock.WriteStream(mock, "stream-key", "value")
+	if err != nil {
+		t.Errorf("WriteStream should return nil: %v", err)
+	}
+}
+
+func TestMockDBOSContext_CloseStream(t *testing.T) {
+	mock := NewMockDBOSContext()
+	err := mock.CloseStream(mock, "stream-key")
+	if err != nil {
+		t.Errorf("CloseStream should return nil: %v", err)
+	}
+}
+
+func TestMockDBOSContext_ReadStream(t *testing.T) {
+	mock := NewMockDBOSContext()
+	vals, closed, err := mock.ReadStream(mock, "wf-1", "key")
+	if err != nil || vals != nil || closed {
+		t.Errorf("ReadStream should return nil, false, nil: %v, %v, %v", vals, closed, err)
+	}
+}
+
+func TestMockDBOSContext_ReadStreamAsync(t *testing.T) {
+	mock := NewMockDBOSContext()
+	ch, err := mock.ReadStreamAsync(mock, "wf-1", "key")
+	if err != nil || ch != nil {
+		t.Errorf("ReadStreamAsync should return nil, nil: %v, %v", ch, err)
+	}
+}
+
+// ============================================================================
+// Mock context — durable ops stubs (0%)
+// ============================================================================
+
+func TestMockDBOSContext_DeprecatePatch(t *testing.T) {
+	mock := NewMockDBOSContext()
+	err := mock.DeprecatePatch(mock, "migration-1")
+	if err != nil {
+		t.Errorf("DeprecatePatch should return nil: %v", err)
+	}
+}
+
+func TestMockDBOSContext_GetStepID(t *testing.T) {
+	mock := NewMockDBOSContext()
+	id, err := mock.GetStepID()
+	if err != nil || id != 0 {
+		t.Errorf("GetStepID should return 0, nil: %d, %v", id, err)
+	}
+}
+
+// ============================================================================
+// Mock context — workflow management stubs (all at 0%)
+// ============================================================================
+
+func TestMockDBOSContext_RetrieveWorkflow(t *testing.T) {
+	mock := NewMockDBOSContext()
+	handle, err := mock.RetrieveWorkflow(mock, "wf-123")
+	if err == nil {
+		t.Error("RetrieveWorkflow should return error")
+	}
+	if handle != nil {
+		t.Error("RetrieveWorkflow should return nil handle")
+	}
+}
+
+func TestMockDBOSContext_CancelWorkflow(t *testing.T) {
+	mock := NewMockDBOSContext()
+	err := mock.CancelWorkflow(mock, "wf-123")
+	if err != nil {
+		t.Errorf("CancelWorkflow should return nil: %v", err)
+	}
+}
+
+func TestMockDBOSContext_SetWorkflowDelay(t *testing.T) {
+	mock := NewMockDBOSContext()
+	err := mock.SetWorkflowDelay(mock, "wf-123")
+	if err != nil {
+		t.Errorf("SetWorkflowDelay should return nil: %v", err)
+	}
+}
+
+func TestMockDBOSContext_ResumeWorkflow(t *testing.T) {
+	mock := NewMockDBOSContext()
+	handle, err := mock.ResumeWorkflow(mock, "wf-123")
+	if err == nil {
+		t.Error("ResumeWorkflow should return error")
+	}
+	if handle != nil {
+		t.Error("ResumeWorkflow should return nil handle")
+	}
+}
+
+func TestMockDBOSContext_ResumeWorkflows(t *testing.T) {
+	mock := NewMockDBOSContext()
+	handles, err := mock.ResumeWorkflows(mock, []string{"wf-1", "wf-2"})
+	if err == nil {
+		t.Error("ResumeWorkflows should return error")
+	}
+	if handles != nil {
+		t.Error("ResumeWorkflows should return nil handles")
+	}
+}
+
+func TestMockDBOSContext_ForkWorkflow(t *testing.T) {
+	mock := NewMockDBOSContext()
+	handle, err := mock.ForkWorkflow(mock, dbos.ForkWorkflowInput{})
+	if err == nil {
+		t.Error("ForkWorkflow should return error")
+	}
+	if handle != nil {
+		t.Error("ForkWorkflow should return nil handle")
+	}
+}
+
+func TestMockDBOSContext_ListWorkflows(t *testing.T) {
+	mock := NewMockDBOSContext()
+	statuses, err := mock.ListWorkflows(mock)
+	if err != nil || statuses != nil {
+		t.Errorf("ListWorkflows should return nil, nil: %v, %v", statuses, err)
+	}
+}
+
+func TestMockDBOSContext_GetWorkflowSteps(t *testing.T) {
+	mock := NewMockDBOSContext()
+	steps, err := mock.GetWorkflowSteps(mock, "wf-1")
+	if err != nil || steps != nil {
+		t.Errorf("GetWorkflowSteps should return nil, nil: %v, %v", steps, err)
+	}
+}
+
+func TestMockDBOSContext_ListRegisteredWorkflows(t *testing.T) {
+	mock := NewMockDBOSContext()
+	entries, err := mock.ListRegisteredWorkflows(mock)
+	if err != nil || entries != nil {
+		t.Errorf("ListRegisteredWorkflows should return nil, nil: %v, %v", entries, err)
+	}
+}
+
+func TestMockDBOSContext_ListRegisteredQueues(t *testing.T) {
+	mock := NewMockDBOSContext()
+	queues, err := mock.ListRegisteredQueues(mock)
+	if err != nil || queues != nil {
+		t.Errorf("ListRegisteredQueues should return nil, nil: %v, %v", queues, err)
+	}
+}
+
+func TestMockDBOSContext_DeleteWorkflows(t *testing.T) {
+	mock := NewMockDBOSContext()
+	err := mock.DeleteWorkflows(mock, []string{"wf-1", "wf-2"})
+	if err != nil {
+		t.Errorf("DeleteWorkflows should return nil: %v", err)
+	}
+}
+
+// ============================================================================
+// Mock context — context management (From, WithoutCancel, WithTimeout)
+// ============================================================================
+
+func TestMockDBOSContext_From(t *testing.T) {
+	mock := NewMockDBOSContext()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	derived := mock.From(mock, ctx)
+	if derived == nil {
+		t.Fatal("From returned nil")
+	}
+}
+
+func TestMockDBOSContext_WithoutCancel(t *testing.T) {
+	mock := NewMockDBOSContext()
+	derived := mock.WithoutCancel(mock)
+	if derived != mock {
+		t.Error("WithoutCancel should return same mock")
+	}
+}
+
+func TestMockDBOSContext_WithTimeout(t *testing.T) {
+	mock := NewMockDBOSContext()
+	derived, cancel := mock.WithTimeout(mock, time.Second)
+	defer cancel()
+	if derived == nil {
+		t.Fatal("WithTimeout returned nil")
+	}
+}
