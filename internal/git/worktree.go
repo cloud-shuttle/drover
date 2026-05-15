@@ -264,32 +264,50 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 
 // Cleanup removes all worktrees
 func (wm *WorktreeManager) Cleanup() error {
+	// Primary strategy: remove all directories under wm.worktreeDir.
+	// This is more reliable than parsing git output because git may keep
+	// registrations even when paths are missing or in an unexpected format.
+	if entries, err := os.ReadDir(wm.worktreeDir); err == nil {
+		for _, ent := range entries {
+			if !ent.IsDir() {
+				continue
+			}
+			// Directory name corresponds to taskID in our layout.
+			wm.cleanUpWorktree(ent.Name())
+		}
+	}
+
+	// Secondary strategy: remove any registered worktrees under wm.worktreeDir
+	// (covers the case where directories were deleted but registrations remain).
 	cmd := exec.Command("git", "worktree", "list", "--porcelain")
 	cmd.Dir = wm.baseDir
 	output, err := cmd.Output()
-	if err != nil {
-		return nil // No worktrees to clean
-	}
-
-	// Parse and remove each worktree
-	lines := strings.Split(string(output), "\n")
-	for _, line := range lines {
-		if len(line) == 0 {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-		worktreePath := parts[1]
-
-		// Only remove worktrees in our directory
-		if filepath.Dir(worktreePath) == wm.worktreeDir || filepath.HasPrefix(worktreePath, wm.worktreeDir+"/") {
-			cmd := exec.Command("git", "worktree", "remove", worktreePath)
-			cmd.Dir = wm.baseDir
-			_ = cmd.Run() // Ignore errors
+	if err == nil {
+		lines := strings.Split(string(output), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "worktree ") {
+				continue
+			}
+			worktreePath := strings.TrimSpace(strings.TrimPrefix(line, "worktree "))
+			if worktreePath == "" {
+				continue
+			}
+			cleanWT := filepath.Clean(worktreePath)
+			cleanRoot := filepath.Clean(wm.worktreeDir)
+			if strings.HasPrefix(cleanWT, cleanRoot+string(os.PathSeparator)) {
+				rm := exec.Command("git", "worktree", "remove", "--force", worktreePath)
+				rm.Dir = wm.baseDir
+				_, _ = rm.CombinedOutput()
+				_ = os.RemoveAll(worktreePath)
+			}
 		}
 	}
+
+	// Best-effort pruning of stale registrations.
+	prune := exec.Command("git", "worktree", "prune")
+	prune.Dir = wm.baseDir
+	_ = prune.Run()
 
 	return nil
 }

@@ -23,6 +23,7 @@ type CodexAgent struct {
 	codexPath string
 	timeout   time.Duration
 	verbose   bool
+	guidelines string // Project-specific guidelines
 }
 
 // NewCodexAgent creates a new Codex agent
@@ -31,12 +32,18 @@ func NewCodexAgent(codexPath string, timeout time.Duration) *CodexAgent {
 		codexPath: codexPath,
 		timeout:   timeout,
 		verbose:   false,
+		guidelines: "",
 	}
 }
 
 // SetVerbose enables or disables verbose logging
 func (a *CodexAgent) SetVerbose(v bool) {
 	a.verbose = v
+}
+
+// SetGuidelines sets project-specific guidelines for agent prompts
+func (a *CodexAgent) SetGuidelines(guidelines string) {
+	a.guidelines = guidelines
 }
 
 // ExecuteWithContext runs a task with a context and returns the execution result
@@ -154,6 +161,15 @@ func (a *CodexAgent) CheckInstalled() error {
 // buildPrompt creates the Codex prompt for a task
 func (a *CodexAgent) buildPrompt(task *types.Task) string {
 	var prompt strings.Builder
+
+	// Add project guidelines if available (Epic 2: Project-Level Configuration)
+	if a.guidelines != "" {
+		prompt.WriteString("## Project Guidelines\n\n")
+		// Expand template variables in guidelines
+		expandedGuidelines := expandGuidelineTemplates(a.guidelines, task)
+		prompt.WriteString(expandedGuidelines)
+		prompt.WriteString("\n\n---\n\n")
+	}
 
 	prompt.WriteString(fmt.Sprintf("Task: %s\n", task.Title))
 

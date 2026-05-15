@@ -22,6 +22,7 @@ type ClaudeAgent struct {
 	claudePath string
 	timeout    time.Duration
 	verbose    bool
+	guidelines string // Project-specific guidelines
 }
 
 // NewClaudeAgent creates a new Claude Code agent
@@ -30,12 +31,18 @@ func NewClaudeAgent(claudePath string, timeout time.Duration) *ClaudeAgent {
 		claudePath: claudePath,
 		timeout:    timeout,
 		verbose:    false,
+		guidelines: "",
 	}
 }
 
 // SetVerbose enables or disables verbose logging
 func (a *ClaudeAgent) SetVerbose(v bool) {
 	a.verbose = v
+}
+
+// SetGuidelines sets project-specific guidelines for agent prompts
+func (a *ClaudeAgent) SetGuidelines(guidelines string) {
+	a.guidelines = guidelines
 }
 
 // ExecuteWithContext runs a task with a context and returns the execution result
@@ -146,6 +153,15 @@ func (a *ClaudeAgent) CheckInstalled() error {
 // buildPrompt creates the Claude prompt for a task
 func (a *ClaudeAgent) buildPrompt(task *types.Task) string {
 	var prompt strings.Builder
+
+	// Add project guidelines if available (Epic 2: Project-Level Configuration)
+	if a.guidelines != "" {
+		prompt.WriteString("## Project Guidelines\n\n")
+		// Expand template variables in guidelines
+		expandedGuidelines := expandGuidelineTemplates(a.guidelines, task)
+		prompt.WriteString(expandedGuidelines)
+		prompt.WriteString("\n\n---\n\n")
+	}
 
 	prompt.WriteString(fmt.Sprintf("Task: %s\n", task.Title))
 

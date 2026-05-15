@@ -1,5 +1,7 @@
 # 🐂 Drover
 
+> Part of the [Drover Ecosystem](../DROVER_ECOSYSTEM.md) — Orchestrating Autonomous Agentic Engineering
+
 **Drive your project to completion with parallel AI agents.**
 
 ![Drover](images/drover.png)
@@ -119,12 +121,21 @@ Drover supports multiple AI coding agents through a pluggable interface:
 
 | Agent | Type | Description |
 |-------|------|-------------|
+| **drover-code** | `drovercode` | Pure Go static binary – headless, Unikraft-ready, JSON output (recommended) |
 | **Claude Code** | `claude` | Anthropic's Claude Code CLI (default) |
 | **Codex** | `codex` | OpenAI's Codex agent |
 | **Amp** | `amp` | Amp AI agent |
 | **OpenCode** | `opencode` | OpenCode CLI by Anomaly |
 
 ```bash
+# Use drover-code (Recommended)
+export DROVER_AGENT_TYPE=drovercode
+export DROVER_AGENT_PATH=$(which drover-code)
+export DROVER_CODE_HEADLESS=1
+export DROVER_CODE_PERMISSION_PRESET=unikernel
+export DROVER_CODE_COORDINATOR_MODE=1   # for advanced decomposition
+drover run --workers 8
+
 # Use Codex instead of Claude
 export DROVER_AGENT_TYPE="codex"
 drover run
@@ -390,7 +401,7 @@ Drover is built on a pure Go stack:
 | Isolation | Git Worktrees | Parallel workspaces |
 | Observability | OpenTelemetry | Traces & metrics |
 
-See [DESIGN.md](./design/DESIGN.md) for detailed architecture documentation.
+See the [Documentation Index](./docs/README.md) and [Architecture Design](./docs/explanation/design.md) for detailed architecture documentation.
 
 ## Comparison
 

@@ -23,6 +23,7 @@ import (
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
+	"github.com/cloud-shuttle/drover-libs/pkg/clock"
 )
 
 // Orchestrator manages the main execution loop
@@ -35,10 +36,11 @@ type Orchestrator struct {
 	verbose  bool // Enable verbose logging
 	projectDir string // Project directory for beads sync
 	epicID   string // Optional epic filter for task execution
+	clock    clock.Clock
 }
 
 // NewOrchestrator creates a new workflow orchestrator
-func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*Orchestrator, error) {
+func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string, clk clock.Clock) (*Orchestrator, error) {
 	gitMgr := git.NewWorktreeManager(
 		projectDir,
 		filepath.Join(projectDir, cfg.WorktreeDir),
@@ -47,10 +49,12 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 
 	// Create the agent based on configuration
 	agent, err := executor.NewAgent(&executor.AgentConfig{
-		Type:    cfg.AgentType,
-		Path:    cfg.AgentPath,
-		Timeout: cfg.TaskTimeout,
-		Verbose: cfg.Verbose,
+		Type:       cfg.AgentType,
+		Path:       cfg.AgentPath,
+		Timeout:    cfg.TaskTimeout,
+		Verbose:    cfg.Verbose,
+		Guidelines: cfg.Guidelines,
+		DroverCode: cfg.DroverCode,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating agent: %w", err)
@@ -71,6 +75,7 @@ func NewOrchestrator(cfg *config.Config, store *db.Store, projectDir string) (*O
 		workers:    cfg.Workers,
 		verbose:    cfg.Verbose,
 		projectDir: projectDir,
+		clock:      clk,
 	}, nil
 }
 
@@ -148,7 +153,7 @@ func (o *Orchestrator) worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 			return
 		default:
 			// Try to claim a task (filtered by epic if set)
-			workerID := fmt.Sprintf("worker-%d-%d", id, time.Now().UnixNano())
+			workerID := fmt.Sprintf("worker-%d-%d", id, o.clock.Now().UnixNano())
 			task, err := o.store.ClaimTaskForEpic(workerID, o.epicID)
 			if err != nil {
 				log.Printf("Worker %d: error claiming task: %v", id, err)
@@ -173,10 +178,16 @@ func (o *Orchestrator) worker(ctx context.Context, id int, wg *sync.WaitGroup) {
 
 // executeTask executes a single task
 func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
-	start := time.Now()
+	start := o.clock.Now()
 	taskCompleted := false
 
 	log.Printf("👷 Worker %d executing task %s: %s", workerID, task.ID, task.Title)
+
+	// If the task was cancelled after being claimed, skip execution.
+	if status, err := o.store.GetTaskStatus(task.ID); err == nil && status == types.TaskStatusCancelled {
+		log.Printf("🛑 Task %s was cancelled; skipping execution", task.ID)
+		return
+	}
 
 	// Check if task has sub-tasks - execute them first
 	hasChildren, err := o.store.HasSubTasks(task.ID)
@@ -217,9 +228,15 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 			// Only mark as failed if task is still in_progress (i.e., error handler didn't run)
 			// Don't mark as failed if task was set to ready for retry
 			status, err := o.store.GetTaskStatus(task.ID)
-			if err == nil && status == types.TaskStatusInProgress {
-				log.Printf("⚠️  Task %s still in_progress at exit, marking as failed", task.ID)
-				_ = o.store.UpdateTaskStatus(task.ID, types.TaskStatusFailed, "Task did not complete")
+			if err == nil {
+				// Never override a cancellation
+				if status == types.TaskStatusCancelled {
+					return
+				}
+				if status == types.TaskStatusInProgress {
+					log.Printf("⚠️  Task %s still in_progress at exit, marking as failed", task.ID)
+					_ = o.store.UpdateTaskStatus(task.ID, types.TaskStatusFailed, "Task did not complete")
+				}
 			}
 		}
 	}()
@@ -237,8 +254,16 @@ func (o *Orchestrator) executeTask(workerID int, task *types.Task) {
 	}
 	defer o.git.Remove(task.ID)
 
+	// Epic 3: Context window management (write large payloads to file + replace description)
+	preparedTask := *task
+	// Epic 6: Task context carrying (prepend recent task summaries)
+	InjectRecentTaskContext(o.store, o.config, &preparedTask)
+	if err := PrepareTaskContextForAgent(worktreePath, o.config, &preparedTask); err != nil {
+		log.Printf("⚠️  Failed to prepare task context for %s: %v", task.ID, err)
+	}
+
 	// Execute Claude Code and capture the result
-	result := o.agent.ExecuteWithContext(taskCtx, worktreePath, task, taskSpan)
+	result := o.agent.ExecuteWithContext(taskCtx, worktreePath, &preparedTask, taskSpan)
 	if !result.Success {
 		log.Printf("❌ Task %s failed: claude execution: %v", task.ID, result.Error)
 		telemetry.RecordError(taskSpan, result.Error, "AgentExecutionFailed", "agent")
@@ -345,14 +370,20 @@ func (o *Orchestrator) executeSubTasks(workerID int, parentTask *types.Task) boo
 		}
 
 		// Execute sub-task
-		start := time.Now()
+		start := o.clock.Now()
 		taskCtx, taskSpan := telemetry.StartTaskSpan(context.Background(),
 			telemetry.SpanTaskExecute,
 			telemetry.TaskAttrs(subTask.ID, subTask.Title, "in_progress", subTask.Priority, subTask.Attempts)...)
 		telemetry.RecordTaskClaimed(taskCtx, fmt.Sprintf("worker-%d", workerID), parentTask.EpicID)
 		defer taskSpan.End()
 
-		result := o.agent.ExecuteWithContext(taskCtx, worktreePath, subTask, taskSpan)
+		preparedSubTask := *subTask
+		InjectRecentTaskContext(o.store, o.config, &preparedSubTask)
+		if err := PrepareTaskContextForAgent(worktreePath, o.config, &preparedSubTask); err != nil {
+			log.Printf("⚠️  Failed to prepare task context for %s: %v", subTask.ID, err)
+		}
+
+		result := o.agent.ExecuteWithContext(taskCtx, worktreePath, &preparedSubTask, taskSpan)
 
 		// Clean up worktree
 		o.git.Remove(subTask.ID)
@@ -411,6 +442,12 @@ func (o *Orchestrator) handleTaskFailure(taskID, errorMsg string) bool {
 		return false
 	}
 
+	// If the task has been cancelled, do not retry or override state.
+	if task.Status == types.TaskStatusCancelled {
+		log.Printf("🛑 Task %s is cancelled; not applying failure handling", taskID)
+		return false
+	}
+
 	// Check if we've exceeded max attempts
 	if task.Attempts >= task.MaxAttempts {
 		_ = o.store.UpdateTaskStatus(taskID, types.TaskStatusFailed, errorMsg)
@@ -440,9 +477,9 @@ func (o *Orchestrator) printProgress(status *db.ProjectStatus) {
 	}
 
 	progress := float64(status.Completed) / float64(status.Total) * 100
-	log.Printf("📊 Progress: %d/%d tasks (%.1f%%) | Ready: %d | In Progress: %d | Blocked: %d | Failed: %d",
+	log.Printf("📊 Progress: %d/%d tasks (%.1f%%) | Ready: %d | In Progress: %d | Blocked: %d | Failed: %d | Cancelled: %d",
 		status.Completed, status.Total, progress,
-		status.Ready, status.InProgress, status.Blocked, status.Failed)
+		status.Ready, status.InProgress, status.Blocked, status.Failed, status.Cancelled)
 }
 
 // printFinalStatus prints final run results
@@ -453,13 +490,14 @@ func (o *Orchestrator) printFinalStatus(status *db.ProjectStatus) {
 	fmt.Printf("\nCompleted:       %d", status.Completed)
 	fmt.Printf("\nFailed:          %d", status.Failed)
 	fmt.Printf("\nBlocked:         %d", status.Blocked)
+	fmt.Printf("\nCancelled:       %d", status.Cancelled)
 
 	if status.Total > 0 {
 		successRate := float64(status.Completed) / float64(status.Total) * 100
 		fmt.Printf("\n\nSuccess rate:    %.1f%%", successRate)
 	}
 
-	if status.Failed > 0 || status.Blocked > 0 {
+	if status.Failed > 0 || status.Blocked > 0 || status.Cancelled > 0 {
 		fmt.Println("\n\n⚠️  Some tasks did not complete successfully")
 		fmt.Println("   Run 'drover status' for details")
 	}

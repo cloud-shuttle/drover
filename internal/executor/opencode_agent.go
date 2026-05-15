@@ -22,6 +22,7 @@ type OpenCodeAgent struct {
 	opencodePath string
 	timeout      time.Duration
 	verbose      bool
+	guidelines   string // Project-specific guidelines
 }
 
 // NewOpenCodeAgent creates a new OpenCode agent
@@ -30,12 +31,18 @@ func NewOpenCodeAgent(opencodePath string, timeout time.Duration) *OpenCodeAgent
 		opencodePath: opencodePath,
 		timeout:      timeout,
 		verbose:      false,
+		guidelines:   "",
 	}
 }
 
 // SetVerbose enables or disables verbose logging
 func (a *OpenCodeAgent) SetVerbose(v bool) {
 	a.verbose = v
+}
+
+// SetGuidelines sets project-specific guidelines for agent prompts
+func (a *OpenCodeAgent) SetGuidelines(guidelines string) {
+	a.guidelines = guidelines
 }
 
 // ExecuteWithContext runs a task with a context and returns the execution result
@@ -145,6 +152,15 @@ func (a *OpenCodeAgent) CheckInstalled() error {
 // buildPrompt creates the OpenCode prompt for a task
 func (a *OpenCodeAgent) buildPrompt(task *types.Task) string {
 	var prompt strings.Builder
+
+	// Add project guidelines if available (Epic 2: Project-Level Configuration)
+	if a.guidelines != "" {
+		prompt.WriteString("## Project Guidelines\n\n")
+		// Expand template variables in guidelines
+		expandedGuidelines := expandGuidelineTemplates(a.guidelines, task)
+		prompt.WriteString(expandedGuidelines)
+		prompt.WriteString("\n\n---\n\n")
+	}
 
 	prompt.WriteString(fmt.Sprintf("Task: %s\n", task.Title))
 

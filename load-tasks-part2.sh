@@ -1,10 +1,13 @@
 #!/bin/bash
 set -e
 
-DROVER="./drover"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# First run the epic creation
-source ./load-tasks.sh
+# Backwards-compat wrapper:
+# This file historically duplicated the full task-loading list.
+# Prefer running: ./load-tasks.sh
+echo "NOTE: load-tasks-part2.sh is deprecated. Use ./load-tasks.sh instead." >&2
+exec "$SCRIPT_DIR/load-tasks.sh"
 
 echo ""
 echo "=== Creating Tasks ==="

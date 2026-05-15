@@ -596,3 +596,127 @@ func TestStore_ResetTasksByIDs_Empty(t *testing.T) {
 		t.Errorf("Expected task status to still be 'completed', got '%s'", status)
 	}
 }
+
+func TestStore_CancelTask(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	task, err := store.CreateTask("Cancel me", "desc", "", 0, nil)
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	if err := store.CancelTask(task.ID, "user cancelled"); err != nil {
+		t.Fatalf("CancelTask: %v", err)
+	}
+
+	status, err := store.GetTaskStatus(task.ID)
+	if err != nil {
+		t.Fatalf("GetTaskStatus: %v", err)
+	}
+	if status != types.TaskStatusCancelled {
+		t.Fatalf("expected status %s, got %s", types.TaskStatusCancelled, status)
+	}
+}
+
+func TestStore_RetryTask_SetsBlockedIfDependenciesRemain(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	blocker, err := store.CreateTask("Blocker", "", "", 0, nil)
+	if err != nil {
+		t.Fatalf("CreateTask blocker: %v", err)
+	}
+	task, err := store.CreateTask("Blocked", "", "", 0, []string{blocker.ID})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	if err := store.UpdateTaskStatus(task.ID, types.TaskStatusFailed, "failed"); err != nil {
+		t.Fatalf("UpdateTaskStatus: %v", err)
+	}
+
+	newStatus, err := store.RetryTask(task.ID, false)
+	if err != nil {
+		t.Fatalf("RetryTask: %v", err)
+	}
+	if newStatus != types.TaskStatusBlocked {
+		t.Fatalf("expected status %s, got %s", types.TaskStatusBlocked, newStatus)
+	}
+}
+
+func TestStore_ResolveTask_ClearsDependenciesAndSetsReady(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	blocker, err := store.CreateTask("Blocker", "", "", 0, nil)
+	if err != nil {
+		t.Fatalf("CreateTask blocker: %v", err)
+	}
+	task, err := store.CreateTask("Blocked", "", "", 0, []string{blocker.ID})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	if err := store.ResolveTask(task.ID, "manual resolution"); err != nil {
+		t.Fatalf("ResolveTask: %v", err)
+	}
+
+	status, _ := store.GetTaskStatus(task.ID)
+	if status != types.TaskStatusReady {
+		t.Fatalf("expected status %s, got %s", types.TaskStatusReady, status)
+	}
+
+	blockedBy, err := store.GetBlockedBy(task.ID)
+	if err != nil {
+		t.Fatalf("GetBlockedBy: %v", err)
+	}
+	if len(blockedBy) != 0 {
+		t.Fatalf("expected 0 dependencies, got %d", len(blockedBy))
+	}
+}
+
+func TestStore_ListRecentCompletedTasks(t *testing.T) {
+	store, _ := setupTestDB(t)
+	defer store.Close()
+
+	epic, err := store.CreateEpic("E", "")
+	if err != nil {
+		t.Fatalf("CreateEpic: %v", err)
+	}
+
+	// Create a few tasks and mark them completed in a controlled order.
+	t1, _ := store.CreateTask("T1", "", epic.ID, 0, nil)
+	t2, _ := store.CreateTask("T2", "", epic.ID, 0, nil)
+	t3, _ := store.CreateTask("T3", "", "", 0, nil) // different epic
+
+	if err := store.UpdateTaskStatus(t1.ID, types.TaskStatusCompleted, ""); err != nil {
+		t.Fatalf("complete t1: %v", err)
+	}
+	if err := store.UpdateTaskStatus(t2.ID, types.TaskStatusCompleted, ""); err != nil {
+		t.Fatalf("complete t2: %v", err)
+	}
+	if err := store.UpdateTaskStatus(t3.ID, types.TaskStatusCompleted, ""); err != nil {
+		t.Fatalf("complete t3: %v", err)
+	}
+
+	// Query epic-scoped
+	recent, err := store.ListRecentCompletedTasks(10, epic.ID, "")
+	if err != nil {
+		t.Fatalf("ListRecentCompletedTasks: %v", err)
+	}
+	if len(recent) != 2 {
+		t.Fatalf("expected 2 epic-scoped results, got %d", len(recent))
+	}
+
+	// Exclude one
+	recent2, err := store.ListRecentCompletedTasks(10, "", t2.ID)
+	if err != nil {
+		t.Fatalf("ListRecentCompletedTasks: %v", err)
+	}
+	for _, r := range recent2 {
+		if r.ID == t2.ID {
+			t.Fatalf("expected exclude to remove %s", t2.ID)
+		}
+	}
+}

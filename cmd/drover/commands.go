@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -13,11 +14,12 @@ import (
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/config"
+	"github.com/cloud-shuttle/drover/internal/dashboard"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/internal/template"
-	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/cloud-shuttle/drover/internal/workflow"
+	"github.com/cloud-shuttle/drover/pkg/types"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/spf13/cobra"
 )
@@ -177,8 +179,21 @@ func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, store *db.Store, pro
 		fmt.Printf("🎯 Filtering to epic: %s\n", epicID)
 	}
 
+	// Setup context with signal handling for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		fmt.Println("\n🛑 Interrupt received, stopping DBOS workflow gracefully...")
+		cancel()
+		signal.Stop(sigCh)
+	}()
+
 	// Initialize DBOS context
-	dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{
+	dbosCtx, err := dbos.NewDBOSContext(ctx, dbos.Config{
 		AppName:     "drover",
 		DatabaseURL: dbosURL,
 	})
@@ -614,6 +629,164 @@ Otherwise, use flags to specify which statuses to reset.`,
 	return command
 }
 
+func cancelCmd() *cobra.Command {
+	var note string
+
+	command := &cobra.Command{
+		Use:   "cancel <task-id>",
+		Short: "Cancel a task so it will not be executed",
+		Long: `Cancel a task so it will not be executed.
+
+This updates the task status to 'cancelled' and clears any claim information.
+If a worktree exists for the task, Drover will attempt best-effort cleanup.
+
+Note: If a worker is already executing the task, cancellation may not stop it mid-run.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			projectDir, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			taskID := args[0]
+			task, err := store.GetTask(taskID)
+			if err != nil {
+				return fmt.Errorf("task not found: %s", taskID)
+			}
+
+			if task.Status == types.TaskStatusCompleted {
+				return fmt.Errorf("cannot cancel completed task %s", taskID)
+			}
+
+			if task.Status == types.TaskStatusCancelled {
+				fmt.Printf("🛑 Task %s is already cancelled\n", taskID)
+				return nil
+			}
+
+			if note == "" {
+				note = "Cancelled by user"
+			}
+
+			if err := store.CancelTask(taskID, note); err != nil {
+				return err
+			}
+
+			// If DBOS mode is enabled, best-effort cancel the in-flight DBOS workflow too.
+			// This stops execution at the start of the next step and removes enqueued workflows from the queue.
+			if dbosURL := os.Getenv("DBOS_SYSTEM_DATABASE_URL"); dbosURL != "" {
+				dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{
+					AppName:     "drover",
+					DatabaseURL: dbosURL,
+				})
+				if err == nil {
+					workflowID := workflow.DBOSWorkflowIDForTask(taskID)
+					if err := dbos.CancelWorkflow(dbosCtx, workflowID); err != nil {
+						// Non-fatal: task is still marked cancelled in SQLite.
+						fmt.Fprintf(os.Stderr, "Warning: failed to cancel DBOS workflow %s: %v\n", workflowID, err)
+					}
+					dbos.Shutdown(dbosCtx, 5*time.Second)
+				} else {
+					fmt.Fprintf(os.Stderr, "Warning: failed to initialize DBOS context for cancellation: %v\n", err)
+				}
+			}
+
+			// Best-effort worktree cleanup
+			worktreeDir := filepath.Join(projectDir, ".drover", "worktrees")
+			gitMgr := git.NewWorktreeManager(projectDir, worktreeDir)
+			_ = gitMgr.Remove(taskID)
+
+			// Best-effort DB cleanup for worktree tracking
+			_ = store.UpdateWorktreeStatus(taskID, "removed")
+			_ = store.DeleteWorktree(taskID)
+
+			fmt.Printf("🛑 Cancelled task %s\n", taskID)
+			return nil
+		},
+	}
+
+	command.Flags().StringVar(&note, "note", "", "Optional cancellation note")
+	return command
+}
+
+func retryCmd() *cobra.Command {
+	var force bool
+
+	command := &cobra.Command{
+		Use:   "retry <task-id>",
+		Short: "Retry a task by resetting it back to runnable state",
+		Long: `Retry a task by resetting it back to runnable state.
+
+This clears attempts and last_error, and sets the task to 'ready' (or 'blocked' if it still has unmet dependencies).
+
+By default, completed tasks cannot be retried; use --force to override.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			taskID := args[0]
+			newStatus, err := store.RetryTask(taskID, force)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("🔄 Retried task %s (new status: %s)\n", taskID, newStatus)
+			return nil
+		},
+	}
+
+	command.Flags().BoolVar(&force, "force", false, "Retry even if task is completed")
+	return command
+}
+
+func resolveCmd() *cobra.Command {
+	var note string
+
+	command := &cobra.Command{
+		Use:   "resolve <task-id>",
+		Short: "Manually resolve a blocked task (force-unblock)",
+		Long: `Manually resolve a blocked task (force-unblock).
+
+This clears any dependencies for the task and sets it to 'ready'.
+Use --note to record why the task was resolved manually.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, store, err := requireProject()
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			taskID := args[0]
+			task, err := store.GetTask(taskID)
+			if err != nil {
+				return fmt.Errorf("task not found: %s", taskID)
+			}
+			if task.Status != types.TaskStatusBlocked {
+				return fmt.Errorf("task %s is not blocked (current status: %s)", taskID, task.Status)
+			}
+
+			if note == "" {
+				note = "Resolved manually by user"
+			}
+
+			if err := store.ResolveTask(taskID, note); err != nil {
+				return err
+			}
+
+			fmt.Printf("✅ Resolved task %s (set to ready)\n", taskID)
+			return nil
+		},
+	}
+
+	command.Flags().StringVar(&note, "note", "", "Optional resolution note")
+	return command
+}
+
 func exportCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "export",
@@ -786,10 +959,12 @@ func runWatchMode(store *db.Store) error {
 				fmt.Println("════════════════════════════════════════")
 				fmt.Printf("\nTotal:      %d\n", status.Total)
 				fmt.Printf("Ready:      %d\n", status.Ready)
+				fmt.Printf("Claimed:    %d\n", status.Claimed)
 				fmt.Printf("In Progress: %d\n", status.InProgress)
 				fmt.Printf("Completed:  %d\n", status.Completed)
 				fmt.Printf("Failed:     %d\n", status.Failed)
 				fmt.Printf("Blocked:    %d\n", status.Blocked)
+				fmt.Printf("Cancelled:  %d\n", status.Cancelled)
 
 				if status.Total > 0 {
 					progress := float64(status.Completed) / float64(status.Total) * 100
@@ -809,10 +984,12 @@ func runWatchMode(store *db.Store) error {
 func statusChanged(old, new *db.ProjectStatus) bool {
 	return old.Total != new.Total ||
 		old.Ready != new.Ready ||
+		old.Claimed != new.Claimed ||
 		old.InProgress != new.InProgress ||
 		old.Completed != new.Completed ||
 		old.Failed != new.Failed ||
-		old.Blocked != new.Blocked
+		old.Blocked != new.Blocked ||
+		old.Cancelled != new.Cancelled
 }
 
 func printStatus(status *db.ProjectStatus) {
@@ -820,10 +997,12 @@ func printStatus(status *db.ProjectStatus) {
 	fmt.Println("════════════════")
 	fmt.Printf("\nTotal:      %d\n", status.Total)
 	fmt.Printf("Ready:      %d\n", status.Ready)
+	fmt.Printf("Claimed:    %d\n", status.Claimed)
 	fmt.Printf("In Progress: %d\n", status.InProgress)
 	fmt.Printf("Completed:  %d\n", status.Completed)
 	fmt.Printf("Failed:     %d\n", status.Failed)
 	fmt.Printf("Blocked:    %d\n", status.Blocked)
+	fmt.Printf("Cancelled:  %d\n", status.Cancelled)
 
 	if status.Total > 0 {
 		progress := float64(status.Completed) / float64(status.Total) * 100
@@ -990,6 +1169,8 @@ func formatTaskStatus(status types.TaskStatus) string {
 		return "✅ completed"
 	case types.TaskStatusFailed:
 		return "❌ failed"
+	case types.TaskStatusCancelled:
+		return "🛑 cancelled"
 	default:
 		return string(status)
 	}
@@ -1430,4 +1611,32 @@ func dashboardCmd() *cobra.Command {
 	command.Flags().StringVarP(&port, "port", "p", "3847", "Port to run dashboard on")
 	command.Flags().BoolVar(&open, "open", false, "Open browser automatically")
 	return command
+}
+
+// runDashboard starts the dashboard server
+func runDashboard(store *db.Store, port string, openBrowser bool) error {
+	// Import the dashboard package
+	dashServer, err := dashboard.New(dashboard.Config{
+		Addr: ":" + port,
+		DB:   store.DB,
+	})
+	if err != nil {
+		return fmt.Errorf("creating dashboard server: %w", err)
+	}
+
+	// Optionally open browser
+	if openBrowser {
+		url := fmt.Sprintf("http://localhost:%s", port)
+		fmt.Printf("🌐 Opening browser at %s\n", url)
+		// Open browser in a goroutine so we don't block the server
+		go func() {
+			time.Sleep(500 * time.Millisecond) // Give server time to start
+			exec.Command("open", url).Start()  // macOS
+		}()
+	}
+
+	fmt.Printf("🐂 Dashboard running at http://localhost:%s\n", port)
+	fmt.Println("Press Ctrl+C to stop")
+
+	return dashServer.Start()
 }

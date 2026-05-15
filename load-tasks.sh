@@ -1,29 +1,39 @@
 #!/bin/bash
 set -e
 
-DROVER="./drover"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# First run the epic creation
-source ./load-tasks.sh
+# Load shared helpers and create epics.
+# Supports running against an arbitrary project directory via PROJECT_DIR env var.
+source "$SCRIPT_DIR/load-epics.sh"
+load_epics
 
 echo ""
 echo "=== Creating Tasks ==="
 echo ""
 
-# Helper function to extract ID from drover output
-extract_id() {
-    grep -oP '(?<=Created task )[a-z0-9-]+|(?<=Created )[a-z0-9-]+' || echo ""
-}
-
 # Helper to add task with dependencies
 add_task() {
     local title="$1"
-    local epic="${EPIC_IDS[$2]}"
+    local epic
+    epic="$(get_epic_id "$2")"
+    if [ -z "$epic" ]; then
+        echo "ERROR: Unknown epic key '$2' (no epic id found). Did load_epics run?" >&2
+        return 1
+    fi
     local desc="$3"
     shift 3
     local blocked_by=("$@")
 
-    local cmd="$DROVER add \"$title\" --epic $epic -d \"$desc\""
+    # The drover CLI performs task quality validation by default. These loader tasks are
+    # intentionally lightweight planning placeholders, so we skip validation unless
+    # explicitly disabled.
+    local skip_flag="--skip-validation"
+    if [ "${SKIP_VALIDATION:-1}" = "0" ]; then
+        skip_flag=""
+    fi
+
+    local cmd="run_drover add \"$title\" --epic $epic -d \"$desc\" $skip_flag"
 
     # Add blocked-by flags
     for dep in "${blocked_by[@]}"; do

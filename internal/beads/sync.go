@@ -318,6 +318,8 @@ func droverStatusToBeads(droverStatus types.TaskStatus) string {
 		return "closed"
 	case types.TaskStatusFailed:
 		return "closed"
+	case types.TaskStatusCancelled:
+		return "closed"
 	default:
 		return "open"
 	}

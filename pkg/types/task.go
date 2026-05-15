@@ -11,6 +11,7 @@ const (
 	TaskStatusBlocked    TaskStatus = "blocked"
 	TaskStatusCompleted  TaskStatus = "completed"
 	TaskStatusFailed     TaskStatus = "failed"
+	TaskStatusCancelled  TaskStatus = "cancelled"
 )
 
 // Task represents a unit of work for an AI agent
@@ -64,6 +65,7 @@ type ProjectStatus struct {
 	Blocked    int             `json:"blocked"`
 	Completed  int             `json:"completed"`
 	Failed     int             `json:"failed"`
+	Cancelled  int             `json:"cancelled"`
 	Epics      []EpicStatus    `json:"epics"`
 }
 

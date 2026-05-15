@@ -27,6 +27,7 @@ type ProjectStatus struct {
 	Blocked    int
 	Completed  int
 	Failed     int
+	Cancelled  int
 }
 
 // Open opens a SQLite database at the given path
@@ -483,13 +484,122 @@ func (s *Store) GetProjectStatus() (*ProjectStatus, error) {
 			status.Completed = count
 		case types.TaskStatusFailed:
 			status.Failed = count
+		case types.TaskStatusCancelled:
+			status.Cancelled = count
 		}
 	}
 
 	status.Total = status.Ready + status.Claimed + status.InProgress +
-		status.Blocked + status.Completed + status.Failed
+		status.Blocked + status.Completed + status.Failed + status.Cancelled
 
 	return status, nil
+}
+
+// CancelTask marks a task as cancelled and clears any claim information.
+// Note: This is best-effort; if a worker is already executing the task, it may still run to completion.
+func (s *Store) CancelTask(taskID string, note string) error {
+	now := time.Now().Unix()
+	_, err := s.DB.Exec(`
+		UPDATE tasks
+		SET status = 'cancelled',
+		    claimed_by = NULL,
+		    claimed_at = NULL,
+		    last_error = ?,
+		    updated_at = ?
+		WHERE id = ?
+	`, note, now, taskID)
+	if err != nil {
+		return fmt.Errorf("cancelling task: %w", err)
+	}
+	return nil
+}
+
+// RetryTask resets a task back to runnable state.
+// If the task still has unmet dependencies, it will be set to 'blocked', otherwise 'ready'.
+// If force is false, completed tasks cannot be retried.
+func (s *Store) RetryTask(taskID string, force bool) (types.TaskStatus, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return "", fmt.Errorf("beginning retry transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	var current string
+	if err := tx.QueryRow(`SELECT status FROM tasks WHERE id = ?`, taskID).Scan(&current); err != nil {
+		return "", fmt.Errorf("loading task status: %w", err)
+	}
+	if types.TaskStatus(current) == types.TaskStatusCompleted && !force {
+		return "", fmt.Errorf("cannot retry completed task %s without --force", taskID)
+	}
+
+	// Determine whether the task should be ready or blocked based on remaining blockers.
+	var remainingCount int
+	err = tx.QueryRow(`
+		SELECT COUNT(*)
+		FROM task_dependencies td
+		JOIN tasks t ON td.blocked_by = t.id
+		WHERE td.task_id = ? AND t.status != 'completed'
+	`, taskID).Scan(&remainingCount)
+	if err != nil {
+		return "", fmt.Errorf("checking remaining blockers: %w", err)
+	}
+
+	newStatus := types.TaskStatusReady
+	if remainingCount > 0 {
+		newStatus = types.TaskStatusBlocked
+	}
+
+	now := time.Now().Unix()
+	_, err = tx.Exec(`
+		UPDATE tasks
+		SET status = ?,
+		    claimed_by = NULL,
+		    claimed_at = NULL,
+		    attempts = 0,
+		    last_error = NULL,
+		    updated_at = ?
+		WHERE id = ?
+	`, string(newStatus), now, taskID)
+	if err != nil {
+		return "", fmt.Errorf("retrying task: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("committing retry: %w", err)
+	}
+
+	return newStatus, nil
+}
+
+// ResolveTask manually resolves a blocked task by clearing its dependencies and setting it to ready.
+// An optional note can be stored in last_error for audit/debugging.
+func (s *Store) ResolveTask(taskID string, note string) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("beginning resolve transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Clear dependencies for this task
+	if _, err := tx.Exec(`DELETE FROM task_dependencies WHERE task_id = ?`, taskID); err != nil {
+		return fmt.Errorf("clearing dependencies: %w", err)
+	}
+
+	now := time.Now().Unix()
+	_, err = tx.Exec(`
+		UPDATE tasks
+		SET status = 'ready',
+		    claimed_by = NULL,
+		    claimed_at = NULL,
+		    last_error = ?,
+		    updated_at = ?
+		WHERE id = ?
+	`, note, now, taskID)
+	if err != nil {
+		return fmt.Errorf("updating task to ready: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // ClaimTask attempts to atomically claim a ready task
@@ -904,6 +1014,71 @@ func (s *Store) GetBlockedBy(taskID string) ([]string, error) {
 	}
 
 	return blockedBy, nil
+}
+
+// ListRecentCompletedTasks returns the most recently completed tasks, newest first.
+//
+// This is used for Epic 6 (Task Context Carrying) to provide lightweight “memory”
+// of recent work. We exclude sub-tasks (parent_id IS NULL) to reduce noise.
+func (s *Store) ListRecentCompletedTasks(limit int, epicID string, excludeTaskID string) ([]*types.Task, error) {
+	if limit <= 0 {
+		return []*types.Task{}, nil
+	}
+
+	args := []interface{}{excludeTaskID}
+	query := `
+		SELECT id, title, COALESCE(description, ''), COALESCE(epic_id, ''),
+		       COALESCE(parent_id, ''), sequence_number,
+		       priority, status, attempts, max_attempts,
+		       COALESCE(last_error, ''), created_at, updated_at
+		FROM tasks
+		WHERE status = 'completed'
+		  AND parent_id IS NULL
+		  AND id != ?
+	`
+
+	if epicID != "" {
+		query += " AND epic_id = ?"
+		args = append(args, epicID)
+	}
+
+	query += `
+		ORDER BY updated_at DESC
+		LIMIT ?
+	`
+	args = append(args, limit)
+
+	rows, err := s.DB.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying recent completed tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*types.Task
+	for rows.Next() {
+		var task types.Task
+		var epicIDVal sql.NullString
+		var description sql.NullString
+		var parentID sql.NullString
+
+		err := rows.Scan(
+			&task.ID, &task.Title, &description, &epicIDVal,
+			&parentID, &task.SequenceNumber,
+			&task.Priority, &task.Status, &task.Attempts, &task.MaxAttempts,
+			&task.LastError, &task.CreatedAt, &task.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scanning recent completed task: %w", err)
+		}
+
+		task.Description = description.String
+		task.EpicID = epicIDVal.String
+		task.ParentID = parentID.String
+
+		tasks = append(tasks, &task)
+	}
+
+	return tasks, nil
 }
 
 // ListEpics returns all epics in the database

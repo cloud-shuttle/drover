@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"github.com/cloud-shuttle/drover-libs/pkg/clock"
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/config"
@@ -127,7 +128,7 @@ exit 0
 	}
 
 	// Create orchestrator
-	orch, err := workflow.NewOrchestrator(cfg, store, tmpDir)
+	orch, err := workflow.NewOrchestrator(cfg, store, tmpDir, clock.RealClock{})
 	if err != nil {
 		store.Close()
 		t.Fatalf("Failed to create orchestrator: %v", err)
@@ -308,7 +309,7 @@ exit 1
 		Verbose:      true,
 	}
 
-	orch, err := workflow.NewOrchestrator(cfg, store, tmpDir)
+	orch, err := workflow.NewOrchestrator(cfg, store, tmpDir, clock.RealClock{})
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}
@@ -403,7 +404,7 @@ exit 0
 		Verbose:      true,
 	}
 
-	orch, err := workflow.NewOrchestrator(cfg, store, tmpDir)
+	orch, err := workflow.NewOrchestrator(cfg, store, tmpDir, clock.RealClock{})
 	if err != nil {
 		t.Fatalf("Failed to create orchestrator: %v", err)
 	}

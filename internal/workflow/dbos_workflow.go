@@ -20,6 +20,7 @@ import (
 	"github.com/cloud-shuttle/drover/internal/git"
 	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
+	"github.com/cloud-shuttle/drover-libs/pkg/clock"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -69,12 +70,15 @@ type DBOSOrchestrator struct {
 	queue          dbos.WorkflowQueue
 	store          *db.Store // SQLite store for worktree tracking
 	verbose        bool
-	dependencyMap  map[string][]string // taskID -> list of dependent task IDs
+	dependencyMap  map[string][]string    // taskID -> list of dependent task IDs
+	taskRegistry   map[string]TaskInput   // taskID -> full task input for dependency resolution
+	completedTasks map[string]bool        // taskID -> true if task has completed
 	dependencyMu   sync.RWMutex
+	clock          clock.Clock
 }
 
 // NewDBOSOrchestrator creates a new DBOS-based orchestrator
-func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDir string, store *db.Store) (*DBOSOrchestrator, error) {
+func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDir string, store *db.Store, clk clock.Clock) (*DBOSOrchestrator, error) {
 	gitMgr := git.NewWorktreeManager(
 		projectDir,
 		filepath.Join(projectDir, cfg.WorktreeDir),
@@ -83,10 +87,12 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 
 	// Create the agent based on configuration
 	agent, err := executor.NewAgent(&executor.AgentConfig{
-		Type:    cfg.AgentType,
-		Path:    cfg.AgentPath,
-		Timeout: cfg.TaskTimeout,
-		Verbose: cfg.Verbose,
+		Type:       cfg.AgentType,
+		Path:       cfg.AgentPath,
+		Timeout:    cfg.TaskTimeout,
+		Verbose:    cfg.Verbose,
+		Guidelines: cfg.Guidelines,
+		DroverCode: cfg.DroverCode,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("creating agent: %w", err)
@@ -103,17 +109,21 @@ func NewDBOSOrchestrator(cfg *config.Config, dbosCtx dbos.DBOSContext, projectDi
 	// Use a shorter polling interval for faster task processing
 	queue := dbos.NewWorkflowQueue(dbosCtx, "drover-tasks",
 		dbos.WithQueueBasePollingInterval(10*time.Millisecond), // Poll every 10ms for faster execution
+		dbos.WithWorkerConcurrency(cfg.Workers),
 	)
 
 	return &DBOSOrchestrator{
-		config:        cfg,
-		git:           gitMgr,
-		agent:         agent,
-		dbosCtx:       dbosCtx,
-		queue:         queue,
-		store:         store,
-		verbose:       cfg.Verbose,
-		dependencyMap: make(map[string][]string),
+		config:         cfg,
+		git:            gitMgr,
+		agent:          agent,
+		dbosCtx:        dbosCtx,
+		queue:          queue,
+		store:          store,
+		verbose:        cfg.Verbose,
+		dependencyMap:  make(map[string][]string),
+		taskRegistry:   make(map[string]TaskInput),
+		completedTasks: make(map[string]bool),
+		clock:          clk,
 	}, nil
 }
 
@@ -138,12 +148,12 @@ func (o *DBOSOrchestrator) RegisterWorkflows() error {
 // ExecuteAllTasks is the main DBOS workflow that processes all tasks sequentially
 // This is the original implementation for comparison
 func (o *DBOSOrchestrator) ExecuteAllTasks(ctx dbos.DBOSContext, tasks []TaskInput) ([]TaskResult, error) {
-	startTime := time.Now()
+	startTime := o.clock.Now()
 	log.Printf("🐂 Starting DBOS workflow (sequential) with %d tasks", len(tasks))
 
 	// Start telemetry span for the workflow
 	workflowCtx, span := telemetry.StartWorkflowSpan(ctx, telemetry.WorkflowTypeSequential,
-		generateWorkflowID(), attribute.Int("drover.task_count", len(tasks)))
+		o.generateWorkflowID(), attribute.Int("drover.task_count", len(tasks)))
 	defer span.End()
 
 	results := make([]TaskResult, len(tasks))
@@ -190,7 +200,7 @@ func (o *DBOSOrchestrator) ExecuteAllTasks(ctx dbos.DBOSContext, tasks []TaskInp
 // This is the recommended approach for production use
 func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input QueuedTasksInput) (QueueStats, error) {
 	tasks := input.Tasks
-	start := time.Now()
+	start := o.clock.Now()
 
 	log.Printf("🐂 Starting DBOS workflow (queued) with %d tasks", len(tasks))
 
@@ -212,24 +222,22 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input Que
 	// not available when called from within a workflow context.
 	handles := make([]dbos.WorkflowHandle[TaskResult], len(readyTasks))
 	for i, task := range readyTasks {
+		workflowID := DBOSWorkflowIDForTask(task.TaskID)
 		handle, err := dbos.RunWorkflow(o.dbosCtx, o.ExecuteTaskWorkflow, task,
 			dbos.WithQueue(o.queue.Name),
+			dbos.WithWorkflowID(workflowID),
 		)
 		if err != nil {
 			log.Printf("❌ Failed to enqueue task %s: %v", task.TaskID, err)
 			continue
 		}
 		handles[i] = handle
-		log.Printf("📤 Enqueued task %s: %s", task.TaskID, task.Title)
+		log.Printf("📤 Enqueued task %s: %s (workflow_id=%s)", task.TaskID, task.Title, workflowID)
 	}
 
 	// Wait for all enqueued tasks to complete
 	completed := 0
 	failed := 0
-
-	// Give the queue runner a moment to start processing workflows
-	log.Printf("⏸️  Giving queue runner a moment to start...")
-	time.Sleep(100 * time.Millisecond)
 
 	for _, handle := range handles {
 		log.Printf("⏳ Waiting for task result...")
@@ -266,7 +274,7 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input Que
 // This is a helper method that can be called directly (not as a workflow) to enqueue tasks.
 // This avoids the issue of trying to enqueue workflows from within a workflow.
 func (o *DBOSOrchestrator) ExecuteTasksWithQueueDirectly(tasks []TaskInput) (QueueStats, error) {
-	start := time.Now()
+	start := o.clock.Now()
 
 	log.Printf("🚀 Starting DBOS queue-based execution with %d tasks", len(tasks))
 
@@ -289,24 +297,22 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueueDirectly(tasks []TaskInput) (Que
 	// Enqueue all ready tasks for parallel execution
 	handles := make([]dbos.WorkflowHandle[TaskResult], len(readyTasks))
 	for i, task := range readyTasks {
+		workflowID := DBOSWorkflowIDForTask(task.TaskID)
 		handle, err := dbos.RunWorkflow(o.dbosCtx, o.ExecuteTaskWorkflow, task,
 			dbos.WithQueue(o.queue.Name),
+			dbos.WithWorkflowID(workflowID),
 		)
 		if err != nil {
 			log.Printf("❌ Failed to enqueue task %s: %v", task.TaskID, err)
 			continue
 		}
 		handles[i] = handle
-		log.Printf("📤 Enqueued task %s: %s", task.TaskID, task.Title)
+		log.Printf("📤 Enqueued task %s: %s (workflow_id=%s)", task.TaskID, task.Title, workflowID)
 	}
 
 	// Wait for all enqueued tasks to complete
 	completed := 0
 	failed := 0
-
-	// Give the queue runner a moment to start processing workflows
-	log.Printf("⏸️  Giving queue runner a moment to start...")
-	time.Sleep(100 * time.Millisecond)
 
 	for _, handle := range handles {
 		log.Printf("⏳ Waiting for task result...")
@@ -342,7 +348,7 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueueDirectly(tasks []TaskInput) (Que
 // ExecuteTaskWorkflow is a DBOS workflow that executes a single task
 // This is a separate workflow so each task can be independently recovered
 func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskInput) (TaskResult, error) {
-	start := time.Now()
+	start := o.clock.Now()
 	log.Printf("👷 Executing task %s: %s", task.TaskID, task.Title)
 
 	// Start telemetry span for task execution
@@ -426,12 +432,25 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	duration := time.Since(start)
 	log.Printf("✅ Task %s completed in %v", task.TaskID, duration)
 
-	// Broadcast task completed to dashboard
-	dashboard.BroadcastTaskCompleted(task.TaskID, task.Title)
+	// Use dbos.Go to run telemetry and dashboard broadcasts concurrently
+	// These are fire-and-forget side effects that shouldn't block the critical path
+	telemetryCh, _ := dbos.Go(ctx, func(stepCtx context.Context) (bool, error) {
+		telemetry.SetTaskStatus(span, "completed")
+		telemetry.RecordTaskCompleted(taskCtx, "dbos-workflow", "", duration)
+		return true, nil
+	})
+	dashboardCh, _ := dbos.Go(ctx, func(stepCtx context.Context) (bool, error) {
+		dashboard.BroadcastTaskCompleted(task.TaskID, task.Title)
+		return true, nil
+	})
 
-	// Record task completion
-	telemetry.SetTaskStatus(span, "completed")
-	telemetry.RecordTaskCompleted(taskCtx, "dbos-workflow", "", duration)
+	// Wait for both to finish (order doesn't matter)
+	if telemetryCh != nil {
+		<-telemetryCh
+	}
+	if dashboardCh != nil {
+		<-dashboardCh
+	}
 
 	return TaskResult{
 		Success:    true,
@@ -441,7 +460,9 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	}, nil
 }
 
-// OnTaskComplete is called when a task completes and enqueues any dependent tasks
+// OnTaskComplete is called when a task completes and enqueues any dependent tasks.
+// Uses DBOS delayed execution (v0.13.0+) to allow sibling completions to propagate
+// before scheduling dependents, preventing race conditions in multi-blocker scenarios.
 func (o *DBOSOrchestrator) OnTaskComplete(ctx dbos.DBOSContext, completedTaskID string) (int, error) {
 	o.dependencyMu.Lock()
 	defer o.dependencyMu.Unlock()
@@ -455,9 +476,42 @@ func (o *DBOSOrchestrator) OnTaskComplete(ctx dbos.DBOSContext, completedTaskID 
 
 	enqueued := 0
 	for _, depID := range dependents {
-		// In a full implementation, we would check if ALL blockers are complete
-		// before enqueuing the dependent task. For this POC, we just enqueue it.
-		log.Printf("📤 Enqueuing dependent task %s", depID)
+		// Look up the full task input for this dependent
+		taskInput, found := o.findTaskInput(depID)
+		if !found {
+			log.Printf("⚠️  Dependent task %s not found in task registry", depID)
+			continue
+		}
+
+		// Check if ALL blockers are now complete before enqueuing
+		allBlockersComplete := true
+		for _, blockerID := range taskInput.BlockedBy {
+			if blockerID != completedTaskID {
+				// Check if the other blocker has completed
+				if !o.isTaskComplete(blockerID) {
+					allBlockersComplete = false
+					break
+				}
+			}
+		}
+
+		if !allBlockersComplete {
+			log.Printf("⏳ Task %s still has incomplete blockers, skipping", depID)
+			continue
+		}
+
+		// Enqueue with a small delay to allow sibling completion events to propagate
+		workflowID := DBOSWorkflowIDForTask(depID)
+		_, err := dbos.RunWorkflow(o.dbosCtx, o.ExecuteTaskWorkflow, taskInput,
+			dbos.WithQueue(o.queue.Name),
+			dbos.WithWorkflowID(workflowID),
+			dbos.WithDelay(500*time.Millisecond), // Allow propagation before starting
+		)
+		if err != nil {
+			log.Printf("❌ Failed to enqueue dependent task %s: %v", depID, err)
+			continue
+		}
+		log.Printf("📤 Enqueued dependent task %s with 500ms delay (workflow_id=%s)", depID, workflowID)
 		enqueued++
 	}
 
@@ -465,13 +519,17 @@ func (o *DBOSOrchestrator) OnTaskComplete(ctx dbos.DBOSContext, completedTaskID 
 }
 
 // buildDependencyMap builds a map of task IDs to their dependent tasks
+// and populates the task registry for dependency resolution.
 func (o *DBOSOrchestrator) buildDependencyMap(tasks []TaskInput) {
 	o.dependencyMu.Lock()
 	defer o.dependencyMu.Unlock()
 
 	o.dependencyMap = make(map[string][]string)
+	o.taskRegistry = make(map[string]TaskInput)
+	o.completedTasks = make(map[string]bool)
 
 	for _, task := range tasks {
+		o.taskRegistry[task.TaskID] = task
 		for _, blockerID := range task.BlockedBy {
 			o.dependencyMap[blockerID] = append(o.dependencyMap[blockerID], task.TaskID)
 		}
@@ -491,6 +549,27 @@ func (o *DBOSOrchestrator) findReadyTasks(tasks []TaskInput) []TaskInput {
 	}
 
 	return ready
+}
+
+// findTaskInput looks up a task by ID from the task registry.
+// Must be called with dependencyMu held.
+func (o *DBOSOrchestrator) findTaskInput(taskID string) (TaskInput, bool) {
+	task, found := o.taskRegistry[taskID]
+	return task, found
+}
+
+// isTaskComplete checks if a task has been marked as completed.
+// Must be called with dependencyMu held.
+func (o *DBOSOrchestrator) isTaskComplete(taskID string) bool {
+	return o.completedTasks[taskID]
+}
+
+// MarkTaskComplete marks a task as completed in the completion tracker.
+// This is safe to call from outside the orchestrator (e.g., from workflow callbacks).
+func (o *DBOSOrchestrator) MarkTaskComplete(taskID string) {
+	o.dependencyMu.Lock()
+	defer o.dependencyMu.Unlock()
+	o.completedTasks[taskID] = true
 }
 
 // createWorktreeStep creates a git worktree for task isolation
@@ -521,12 +600,21 @@ func (o *DBOSOrchestrator) createWorktreeStep(ctx context.Context, task TaskInpu
 // executeClaudeStep runs Claude Code in the worktree
 // This is a step function - must accept only context.Context
 func (o *DBOSOrchestrator) executeClaudeStep(ctx context.Context, worktreePath string, task TaskInput, parentSpan trace.Span) (*executor.ExecutionResult, error) {
-	result := o.agent.ExecuteWithContext(ctx, worktreePath, &types.Task{
+	t := &types.Task{
 		ID:          task.TaskID,
 		Title:       task.Title,
 		Description: task.Description,
 		EpicID:      task.EpicID,
-	}, parentSpan)
+	}
+
+	// Epic 3: Context window management (write large payloads to file + replace description)
+	// Epic 6: Task context carrying (prepend recent task summaries)
+	InjectRecentTaskContext(o.store, o.config, t)
+	if err := PrepareTaskContextForAgent(worktreePath, o.config, t); err != nil && o.verbose {
+		log.Printf("⚠️  Failed to prepare task context for %s: %v", task.TaskID, err)
+	}
+
+	result := o.agent.ExecuteWithContext(ctx, worktreePath, t, parentSpan)
 
 	if !result.Success {
 		return nil, result.Error
@@ -636,6 +724,13 @@ func (o *DBOSOrchestrator) PrintQueueStats(stats QueueStats) {
 }
 
 // generateWorkflowID generates a unique workflow ID for telemetry
-func generateWorkflowID() string {
-	return fmt.Sprintf("workflow-%d", time.Now().UnixNano())
+func (o *DBOSOrchestrator) generateWorkflowID() string {
+	return fmt.Sprintf("workflow-%d", o.clock.Now().UnixNano())
+}
+
+// DBOSWorkflowIDForTask returns the stable workflow ID used for per-task DBOS workflows.
+// This enables external workflow management (e.g., cancellation) by task ID.
+func DBOSWorkflowIDForTask(taskID string) string {
+	// Use a prefix to avoid colliding with other workflow IDs.
+	return fmt.Sprintf("drover-task-%s", taskID)
 }

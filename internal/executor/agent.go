@@ -3,8 +3,10 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/config"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -23,7 +25,7 @@ type Agent interface {
 
 // AgentConfig contains configuration for creating an agent
 type AgentConfig struct {
-	// Type is the agent type: "claude", "codex", or "amp"
+	// Type is the agent type: "claude", "codex", "amp", or "opencode"
 	Type string
 
 	// Path is the path to the agent binary (for claude/codex/amp CLIs)
@@ -34,21 +36,48 @@ type AgentConfig struct {
 
 	// Verbose enables detailed logging
 	Verbose bool
+
+	// Guidelines are project-specific instructions injected into agent prompts
+	Guidelines string
+
+	// DroverCode specific configuration
+	DroverCode config.DroverCodeConfig
 }
 
 // NewAgent creates a new Agent based on the provided configuration
 func NewAgent(cfg *AgentConfig) (Agent, error) {
-	switch cfg.Type {
+	switch strings.ToLower(cfg.Type) {
+	case "drovercode", "drover-code":
+		agent := NewDroverCodeAgent(cfg.Path, cfg.Timeout)
+		agent.SetVerbose(cfg.Verbose)
+		agent.SetProjectGuidelines(cfg.Guidelines)
+		agent.SetDroverCodeConfig(
+			cfg.DroverCode.ResultJSONPath,
+			cfg.DroverCode.PermissionPreset,
+			cfg.DroverCode.CoordinatorMode,
+			cfg.DroverCode.JSONL,
+		)
+		return agent, nil
 	case "claude":
-		return NewClaudeAgent(cfg.Path, cfg.Timeout), nil
+		agent := NewClaudeAgent(cfg.Path, cfg.Timeout)
+		agent.SetGuidelines(cfg.Guidelines)
+		return agent, nil
 	case "codex":
-		return NewCodexAgent(cfg.Path, cfg.Timeout), nil
+		agent := NewCodexAgent(cfg.Path, cfg.Timeout)
+		agent.SetGuidelines(cfg.Guidelines)
+		return agent, nil
 	case "amp":
-		return NewAmpAgent(cfg.Path, cfg.Timeout), nil
+		agent := NewAmpAgent(cfg.Path, cfg.Timeout)
+		agent.SetGuidelines(cfg.Guidelines)
+		return agent, nil
 	case "opencode":
-		return NewOpenCodeAgent(cfg.Path, cfg.Timeout), nil
+		agent := NewOpenCodeAgent(cfg.Path, cfg.Timeout)
+		agent.SetGuidelines(cfg.Guidelines)
+		return agent, nil
 	default:
 		// Default to Claude for backwards compatibility
-		return NewClaudeAgent(cfg.Path, cfg.Timeout), nil
+		agent := NewClaudeAgent(cfg.Path, cfg.Timeout)
+		agent.SetGuidelines(cfg.Guidelines)
+		return agent, nil
 	}
 }
