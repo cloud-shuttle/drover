@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/config"
@@ -64,7 +65,7 @@ type QueueStats struct {
 // DBOSOrchestrator manages workflow execution using DBOS
 type DBOSOrchestrator struct {
 	config         *config.Config
-	git            *git.WorktreeManager
+	git            GitManager
 	agent          executor.Agent // Agent interface for Claude/Codex/Amp
 	dbosCtx        dbos.DBOSContext
 	queue          dbos.WorkflowQueue
@@ -610,7 +611,7 @@ func (o *DBOSOrchestrator) executeClaudeStep(ctx context.Context, worktreePath s
 	// Epic 3: Context window management (write large payloads to file + replace description)
 	// Epic 6: Task context carrying (prepend recent task summaries)
 	InjectRecentTaskContext(o.store, o.config, t)
-	if err := PrepareTaskContextForAgent(worktreePath, o.config, t); err != nil && o.verbose {
+	if err := PrepareTaskContextForAgent(worktreePath, o.config, t); err != nil {
 		log.Printf("⚠️  Failed to prepare task context for %s: %v", task.TaskID, err)
 	}
 
@@ -723,9 +724,15 @@ func (o *DBOSOrchestrator) PrintQueueStats(stats QueueStats) {
 	}
 }
 
-// generateWorkflowID generates a unique workflow ID for telemetry
+// workflowIDCounter provides a monotonic counter to guarantee unique workflow IDs
+// even when multiple IDs are generated within the same nanosecond.
+var workflowIDCounter atomic.Int64
+
+// generateWorkflowID generates a unique workflow ID for telemetry.
+// Uses timestamp + atomic counter to prevent collisions under concurrent access.
 func (o *DBOSOrchestrator) generateWorkflowID() string {
-	return fmt.Sprintf("workflow-%d", o.clock.Now().UnixNano())
+	seq := workflowIDCounter.Add(1)
+	return fmt.Sprintf("workflow-%d-%d", o.clock.Now().UnixNano(), seq)
 }
 
 // DBOSWorkflowIDForTask returns the stable workflow ID used for per-task DBOS workflows.

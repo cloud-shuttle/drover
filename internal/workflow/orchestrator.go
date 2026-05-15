@@ -30,7 +30,7 @@ import (
 type Orchestrator struct {
 	config   *config.Config
 	store    *db.Store
-	git      *git.WorktreeManager
+	git      GitManager
 	agent    executor.Agent // Agent interface for Claude/Codex/Amp
 	workers  int
 	verbose  bool // Enable verbose logging
@@ -353,7 +353,9 @@ func (o *Orchestrator) executeSubTasks(workerID int, parentTask *types.Task) boo
 			continue
 		}
 
-		// Check if sub-task has its own sub-tasks (shouldn't happen with max depth 2)
+		// Defence-in-depth: CreateSubTask already enforces max depth of 2 levels
+		// (it rejects creation when parent.ParentID != ""). This guard protects
+		// against manual DB edits or future changes to that constraint.
 		hasChildren, _ := o.store.HasSubTasks(subTask.ID)
 		if hasChildren {
 			log.Printf("❌ Sub-task %s has children (max depth exceeded)", subTask.ID)

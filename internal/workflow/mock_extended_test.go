@@ -354,15 +354,20 @@ func TestGenerateWorkflowID_DeterministicWithMockClock(t *testing.T) {
 
 	id1 := o.generateWorkflowID()
 	id2 := o.generateWorkflowID()
-	// Same clock time → same ID (deterministic)
-	if id1 != id2 {
-		t.Errorf("expected identical IDs with frozen clock, got %q and %q", id1, id2)
+	// Atomic counter ensures unique IDs even with frozen clock
+	if id1 == id2 {
+		t.Errorf("expected unique IDs with frozen clock (atomic counter), got %q and %q", id1, id2)
 	}
 
-	// Advance clock → different ID
+	// Both should share the same timestamp prefix
+	if !containsStr(id1, "workflow-") || !containsStr(id2, "workflow-") {
+		t.Errorf("expected 'workflow-' prefix in both IDs: %q, %q", id1, id2)
+	}
+
+	// Advance clock → still different from both
 	mockClock.Add(time.Millisecond)
 	id3 := o.generateWorkflowID()
-	if id1 == id3 {
+	if id1 == id3 || id2 == id3 {
 		t.Error("expected different ID after advancing clock")
 	}
 }
