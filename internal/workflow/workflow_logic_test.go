@@ -720,30 +720,32 @@ func TestHandleTaskFailure_IncrementError(t *testing.T) {
 	defer store.Close()
 	store.InitSchema()
 
-	// Create task, then close the store to force an error
 	task, _ := store.CreateTask("T", "", "", 0, nil)
 
-	// The task exists but we'll close the store to simulate an error
-	// Actually, let's just test the path by making the store work but 
-	// verifying normal increment works
 	o := &Orchestrator{clock: clock.RealClock{}, store: store}
 
-	// First attempt → should succeed and allow retry
+	// First attempt (0 < 3) → should succeed and allow retry
 	retried := o.handleTaskFailure(task.ID, "transient")
 	if !retried {
 		t.Error("expected retry on first failure")
 	}
 
-	// Second attempt
+	// Second attempt (1 < 3)
 	retried = o.handleTaskFailure(task.ID, "transient again")
 	if !retried {
 		t.Error("expected retry on second failure")
 	}
 
-	// Third attempt → should hit max_attempts (default 3)
+	// Third attempt (2 < 3)
+	retried = o.handleTaskFailure(task.ID, "another transient")
+	if !retried {
+		t.Error("expected retry on third failure")
+	}
+
+	// Fourth attempt (3 >= 3) → should hit max_attempts
 	retried = o.handleTaskFailure(task.ID, "final failure")
 	if retried {
-		t.Error("expected no retry after third attempt")
+		t.Error("expected no retry after max attempts exhausted")
 	}
 
 	status, _ := store.GetTaskStatus(task.ID)
