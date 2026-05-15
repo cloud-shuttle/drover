@@ -4,13 +4,12 @@
 
 ![Drover](images/drover.png)
 
-Drover is a durable workflow orchestrator that runs multiple Claude Code agents in parallel to complete your entire project. It manages task dependencies, handles failures gracefully, and guarantees progress through crashes and restarts.
+Drover is a durable workflow orchestrator that runs multiple AI coding agents in parallel to complete your entire project. It manages task dependencies, handles failures gracefully, and guarantees progress through crashes and restarts.
 
 > *"No task left behind."*
 
 ## Workflow Engine
-
-Drover uses **DBOS (Durable Operating System for Workflows)** as its primary workflow engine:
+Drover uses **DBOS v0.14.0 (Durable Operating System for Workflows)** as its primary workflow engine:
 
 - **Development**: SQLite-based orchestration (zero setup, works out of the box)
 - **Production**: DBOS with PostgreSQL (set `DBOS_SYSTEM_DATABASE_URL`)
@@ -21,7 +20,7 @@ Both modes provide durable execution, automatic retries, and crash recovery.
 
 You have a project with dozens of tasks. Running them one at a time is slow. Running them manually in parallel is chaotic. Drover solves this by:
 
-- **Parallel execution** — Run 4, 8, or 16 Claude Code agents simultaneously
+- **Parallel execution** — Run 4, 8, or 16 AI coding agents simultaneously
 - **Durable workflows** — Survive crashes, restarts, and network failures
 - **Smart scheduling** — Respects task dependencies, priorities, and blockers
 - **Isolated workspaces** — Each agent works in its own git worktree
@@ -59,9 +58,9 @@ drover run --epic epic-a1b2
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.22+ (currently targets Go 1.25)
 - Git
-- [Claude Code CLI](https://claude.ai/code) installed and authenticated
+- An AI coding agent installed and authenticated (Claude Code, Codex, Amp, OpenCode, or Drover Code)
 - PostgreSQL (production) or SQLite (local dev, default)
 
 ### From Source
@@ -69,7 +68,7 @@ drover run --epic epic-a1b2
 ```bash
 git clone https://github.com/cloud-shuttle/drover
 cd drover
-go build -o drover .
+go build -o drover ./cmd/drover
 ```
 
 ### With Go Install
@@ -181,6 +180,7 @@ Drover supports multiple AI coding agents through a pluggable interface:
 | **Codex** | `codex` | OpenAI's Codex agent |
 | **Amp** | `amp` | Amp AI agent |
 | **OpenCode** | `opencode` | OpenCode CLI by Anomaly |
+| **Drover Code** | `drover-code` | Cloud Shuttle's native TUI agent |
 
 ```bash
 # Use Codex instead of Claude
@@ -440,13 +440,14 @@ Drover is built on a pure Go stack:
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| CLI | Cobra | Command-line interface |
-| Workflows | DBOS Go | Durable execution |
+| CLI | Cobra v1.10 | Command-line interface |
+| Workflows | DBOS Go v0.14.0 | Durable execution |
 | Database | PostgreSQL/SQLite | State persistence |
-| Agent Interface | Pluggable | Support for Claude, Codex, Amp |
-| AI Agents | Claude/Codex/Amp | Task execution |
+| Agent Interface | Pluggable | Support for Claude, Codex, Amp, OpenCode, Drover Code |
+| AI Agents | Multi-agent | Task execution |
 | Isolation | Git Worktrees | Parallel workspaces |
-| Observability | OpenTelemetry | Traces & metrics |
+| Concurrency | Backpressure (AIMD) | Adaptive worker scaling |
+| Observability | OpenTelemetry v1.43 | Traces & metrics |
 
 **Documentation:**
 - [Documentation Index](./docs/index.md) - Complete documentation hub
@@ -485,7 +486,7 @@ MIT — see [LICENSE](./LICENSE)
 
 Drover stands on the shoulders of giants. We're grateful to:
 
-- **[DBOS](https://dbos.dev/)** — The durable workflow engine that powers Drover's crash recovery and exactly-once execution. The [DBOS Go SDK](https://github.com/dbos-inc/dbos-transact-golang) makes durable workflows accessible in Go.
+- **[DBOS](https://dbos.dev/)** — The durable workflow engine that powers Drover's crash recovery and exactly-once execution. The [DBOS Go SDK v0.14.0](https://github.com/dbos-inc/dbos-transact-golang) makes durable workflows accessible in Go.
 
 - **[Beads](https://github.com/beads-dev/beads)** — Inspired the hierarchical task ID format (`task-123.1`, `task-123.1.2`). Beads' approach to breaking down complex work into manageable pieces heavily influenced Drover's sub-task system.
 

@@ -1,5 +1,7 @@
-# Binaries
-drover
+# Binaries (root-anchored to avoid matching cmd/drover/ paths)
+/drover
+/drover-*
+/server
 *.exe
 *.exe~
 *.dll
@@ -41,7 +43,6 @@ vendor/
 .idea/
 *.swp
 *.swo
-*~
 
 # OS files
 .DS_Store
@@ -52,3 +53,6 @@ Thumbs.db
 debug.txt
 work-task-*.txt
 .release/
+
+# Environment
+.env
