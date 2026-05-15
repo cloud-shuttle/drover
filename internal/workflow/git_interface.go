@@ -25,4 +25,10 @@ type GitManager interface {
 
 	// SetVerbose enables or disables verbose logging.
 	SetVerbose(v bool)
+
+	// PruneStale cleans up stale worktree artifacts for a task.
+	PruneStale(taskID string)
+
+	// GetWorktreePath returns the filesystem path for a task's worktree.
+	GetWorktreePath(taskID string) (string, error)
 }

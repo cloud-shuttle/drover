@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloud-shuttle/drover-libs/pkg/clock"
+	"github.com/cloud-shuttle/drover/internal/clock"
 	"github.com/cloud-shuttle/drover/internal/config"
+	ctxmngr "github.com/cloud-shuttle/drover/internal/context"
 	"github.com/cloud-shuttle/drover/internal/db"
 	"github.com/cloud-shuttle/drover/internal/executor"
 	"github.com/cloud-shuttle/drover/pkg/types"
@@ -29,8 +30,11 @@ func (m *MockAgent) ExecuteWithContext(ctx context.Context, worktreePath string,
 	return m.Result
 }
 
-func (m *MockAgent) CheckInstalled() error { return nil }
-func (m *MockAgent) SetVerbose(bool)       {}
+func (m *MockAgent) CheckInstalled() error                                          { return nil }
+func (m *MockAgent) SetVerbose(bool)                                                 {}
+func (m *MockAgent) SetContextManager(manager *ctxmngr.Manager)                      {}
+func (m *MockAgent) SetProjectGuidelines(guidelines string)                          {}
+func (m *MockAgent) SetTaskContext(recentTasks []*types.Task, taskContextCount int)   {}
 
 // ============================================================================
 // createWorktreeStep
@@ -557,41 +561,21 @@ func TestDBOSPrintResults_AllFailed(t *testing.T) {
 	o.PrintResults(results)
 }
 
-// ============================================================================
-// RegisterWorkflows (smoke test)
-// ============================================================================
-
-func TestRegisterWorkflows(t *testing.T) {
-	mock := NewMockDBOSContext()
-	o := &DBOSOrchestrator{
-		clock:          clock.RealClock{},
-		dbosCtx:        mock,
-		dependencyMap:  make(map[string][]string),
-		taskRegistry:   make(map[string]TaskInput),
-		completedTasks: make(map[string]bool),
-	}
-
-	err := o.RegisterWorkflows()
-	if err != nil {
-		t.Fatalf("RegisterWorkflows error: %v", err)
-	}
-}
+// NOTE: TestRegisterWorkflows removed — depends on NewMockDBOSContext (feat/v030 only).
 
 // ============================================================================
 // generateWorkflowID
 // ============================================================================
 
-func TestGenerateWorkflowID(t *testing.T) {
-	mockClock := clock.NewMockClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
-	o := &DBOSOrchestrator{clock: mockClock}
-	id := o.generateWorkflowID()
+func TestGenerateWorkflowID_Step(t *testing.T) {
+	_ = clock.NewMockClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	// generateWorkflowID is a package-level function on main (uses atomic counter)
+	id := generateWorkflowID()
 	if id == "" {
 		t.Error("expected non-empty workflow ID")
 	}
 
-	// Advance the clock to guarantee different ID
-	mockClock.Add(time.Millisecond)
-	id2 := o.generateWorkflowID()
+	id2 := generateWorkflowID()
 	if id == id2 {
 		t.Error("expected unique workflow IDs")
 	}

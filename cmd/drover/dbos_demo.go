@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/cloud-shuttle/drover/internal/workflow"
-	"github.com/cloud-shuttle/drover-libs/pkg/clock"
 	"github.com/dbos-inc/dbos-transact-golang/dbos"
 	"github.com/spf13/cobra"
 )
@@ -58,7 +57,7 @@ Note: This requires PostgreSQL to be running and DBOS_SYSTEM_DATABASE_URL to be 
 
 			// Create DBOS orchestrator BEFORE launching DBOS (so queues can be registered)
 			// Note: Passing nil for store since this is a demo without a full project
-			orchestrator, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, projectDir, nil, clock.RealClock{})
+			orchestrator, err := workflow.NewDBOSOrchestrator(cfg, dbosCtx, projectDir, nil)
 			if err != nil {
 				return fmt.Errorf("failed to create orchestrator: %w", err)
 			}

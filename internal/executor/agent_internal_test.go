@@ -148,14 +148,14 @@ func TestClaudeAgent_BuildPrompt_WithEpic(t *testing.T) {
 
 func TestClaudeAgent_BuildPrompt_WithGuidelines(t *testing.T) {
 	agent := NewClaudeAgent("fake", 5*time.Minute)
-	agent.SetGuidelines("Always use Go 1.22+")
+	agent.SetProjectGuidelines("Always use Go 1.22+")
 	task := &types.Task{ID: "t1", Title: "Fix bug"}
 	prompt := agent.buildPrompt(task)
 
 	if !strings.Contains(prompt, "Always use Go 1.22+") {
 		t.Error("prompt missing guidelines")
 	}
-	if !strings.Contains(prompt, "Project Guidelines") {
+	if !strings.Contains(prompt, "PROJECT GUIDELINES") {
 		t.Error("prompt missing guidelines header")
 	}
 }
@@ -199,7 +199,7 @@ func TestAmpAgent_BuildPrompt_Minimal(t *testing.T) {
 
 func TestAmpAgent_BuildPrompt_WithGuidelines(t *testing.T) {
 	agent := NewAmpAgent("fake", 5*time.Minute)
-	agent.SetGuidelines("Follow REST conventions")
+	agent.SetProjectGuidelines("Follow REST conventions")
 	task := &types.Task{ID: "t1", Title: "Add API", EpicID: "api-epic"}
 	prompt := agent.buildPrompt(task)
 
@@ -246,7 +246,7 @@ func TestCodexAgent_BuildPrompt_Minimal(t *testing.T) {
 
 func TestCodexAgent_BuildPrompt_Full(t *testing.T) {
 	agent := NewCodexAgent("fake", 5*time.Minute)
-	agent.SetGuidelines("Use connection pooling")
+	agent.SetProjectGuidelines("Use connection pooling")
 	task := &types.Task{
 		ID:          "t1",
 		Title:       "Refactor DB",
@@ -297,7 +297,7 @@ func TestOpenCodeAgent_BuildPrompt_Minimal(t *testing.T) {
 
 func TestOpenCodeAgent_BuildPrompt_WithEverything(t *testing.T) {
 	agent := NewOpenCodeAgent("fake", 5*time.Minute)
-	agent.SetGuidelines("Use structured logging")
+	agent.SetProjectGuidelines("Use structured logging")
 	task := &types.Task{
 		ID:          "t1",
 		Title:       "Add logging",

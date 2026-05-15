@@ -167,9 +167,9 @@ func TestIsEnabled(t *testing.T) {
 // ============================================================================
 
 func TestTaskAttrs(t *testing.T) {
-	attrs := TaskAttrs("t-1", "Fix bug", "ready", 2, 1)
-	if len(attrs) != 5 {
-		t.Fatalf("expected 5 attrs, got %d", len(attrs))
+	attrs := TaskAttrs("t-1", "Fix bug", "ready", "agent", 2, 1)
+	if len(attrs) != 6 {
+		t.Fatalf("expected 6 attrs, got %d", len(attrs))
 	}
 	if v, ok := findAttr(attrs, KeyTaskID); !ok || v.AsString() != "t-1" {
 		t.Errorf("expected task ID 't-1', got %v", v)
@@ -453,7 +453,7 @@ func TestRecordTaskClaimed(t *testing.T) {
 
 func TestRecordTaskCompleted(t *testing.T) {
 	reader := setupTestMeter(t)
-	RecordTaskCompleted(context.Background(), "w1", "p1", 5*time.Second)
+	RecordTaskCompleted(context.Background(), "w1", "p1", "agent", 5*time.Second)
 	var rm metricdata.ResourceMetrics
 	reader.Collect(context.Background(), &rm)
 	assertHasMetric(t, rm, "drover_tasks_completed_total")
@@ -461,7 +461,7 @@ func TestRecordTaskCompleted(t *testing.T) {
 
 func TestRecordTaskFailed(t *testing.T) {
 	reader := setupTestMeter(t)
-	RecordTaskFailed(context.Background(), "w1", "p1", "timeout", 3*time.Second)
+	RecordTaskFailed(context.Background(), "w1", "p1", "agent", "timeout", 3*time.Second)
 	var rm metricdata.ResourceMetrics
 	reader.Collect(context.Background(), &rm)
 	assertHasMetric(t, rm, "drover_tasks_failed_total")
@@ -577,8 +577,8 @@ func TestNilGuards(t *testing.T) {
 	ctx := context.Background()
 	// None of these should panic
 	RecordTaskClaimed(ctx, "", "")
-	RecordTaskCompleted(ctx, "", "", 0)
-	RecordTaskFailed(ctx, "", "", "", 0)
+	RecordTaskCompleted(ctx, "", "", "", 0)
+	RecordTaskFailed(ctx, "", "", "", "", 0)
 	RecordTaskRetry(ctx, "", 0)
 	RecordClaimLatency(ctx, "", 0)
 	RecordBlockerDetected(ctx, "", "")

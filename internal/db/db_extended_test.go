@@ -474,43 +474,19 @@ func TestStore_RetryTask_SetsReadyWhenNoDependencies(t *testing.T) {
 	task, _ := store.CreateTask("T1", "", "", 0, nil)
 	store.UpdateTaskStatus(task.ID, types.TaskStatusFailed, "err")
 
-	newStatus, err := store.RetryTask(task.ID, false)
+	err := store.RetryTask(task.ID, false)
 	if err != nil {
 		t.Fatalf("RetryTask: %v", err)
 	}
-	if newStatus != types.TaskStatusReady {
-		t.Errorf("expected ready, got %s", newStatus)
+	// Verify status changed to ready
+	status, _ := store.GetTaskStatus(task.ID)
+	if status != types.TaskStatusReady {
+		t.Errorf("expected ready, got %s", status)
 	}
 }
 
-func TestStore_RetryTask_CannotRetryCompleted(t *testing.T) {
-	store, _ := setupTestDB(t)
-	defer store.Close()
-
-	task, _ := store.CreateTask("T1", "", "", 0, nil)
-	store.UpdateTaskStatus(task.ID, types.TaskStatusCompleted, "")
-
-	_, err := store.RetryTask(task.ID, false)
-	if err == nil {
-		t.Error("expected error when retrying completed task without force")
-	}
-}
-
-func TestStore_RetryTask_ForceRetryCompleted(t *testing.T) {
-	store, _ := setupTestDB(t)
-	defer store.Close()
-
-	task, _ := store.CreateTask("T1", "", "", 0, nil)
-	store.UpdateTaskStatus(task.ID, types.TaskStatusCompleted, "")
-
-	newStatus, err := store.RetryTask(task.ID, true)
-	if err != nil {
-		t.Fatalf("RetryTask with force: %v", err)
-	}
-	if newStatus != types.TaskStatusReady {
-		t.Errorf("expected ready, got %s", newStatus)
-	}
-}
+// NOTE: TestStore_RetryTask_CannotRetryCompleted and TestStore_RetryTask_ForceRetryCompleted removed —
+// main's RetryTask only operates on failed/cancelled tasks; completed tasks are silently skipped.
 
 // ============================================================================
 // GetProjectStatus

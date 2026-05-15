@@ -786,12 +786,4 @@ func TestPrintFinalStatus_AllCompleted(t *testing.T) {
 	})
 }
 
-func TestPrintFinalStatus_WithCancelled(t *testing.T) {
-	o := &Orchestrator{clock: clock.RealClock{}}
-	o.printFinalStatus(&db.ProjectStatus{
-		Total:     5,
-		Completed: 3,
-		Cancelled: 2,
-	})
-}
-
+// NOTE: TestPrintFinalStatus_WithCancelled removed — Cancelled field doesn't exist in main's ProjectStatus.

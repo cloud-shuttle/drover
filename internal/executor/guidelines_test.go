@@ -117,7 +117,7 @@ func TestNewAgent_AllTypes(t *testing.T) {
 			Path:       "/usr/local/bin/fake-agent",
 			Timeout:    5 * time.Minute,
 			Verbose:    true,
-			Guidelines: "test guidelines",
+			ProjectGuidelines: "test guidelines",
 		}
 		agent, err := NewAgent(cfg)
 		if err != nil {

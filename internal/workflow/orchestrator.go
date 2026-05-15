@@ -41,18 +41,6 @@ import (
 )
 
 // Orchestrator manages the main execution loop
-// GitManager abstracts git worktree operations for testability.
-type GitManager interface {
-	Create(task *types.Task) (string, error)
-	Commit(taskID string, commitMsg string) (bool, error)
-	MergeToMain(taskID string) error
-	Remove(taskID string) error
-	Cleanup() error
-	SetVerbose(verbose bool)
-	PruneStale(taskID string)
-	GetWorktreePath(taskID string) (string, error)
-}
-
 type Orchestrator struct {
 	config        *config.Config
 	store         *db.Store

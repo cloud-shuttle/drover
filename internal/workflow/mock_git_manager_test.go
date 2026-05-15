@@ -87,6 +87,14 @@ func (m *MockGitManager) SetVerbose(v bool) {
 	// no-op for tests
 }
 
+func (m *MockGitManager) PruneStale(taskID string) {
+	// no-op for tests
+}
+
+func (m *MockGitManager) GetWorktreePath(taskID string) (string, error) {
+	return m.WorktreePath, nil
+}
+
 // --- Convenience constructors ---
 
 // NewSuccessGitManager returns a MockGitManager that always succeeds.
