@@ -84,6 +84,8 @@ type DBOSOrchestrator struct {
 	store          *db.Store // SQLite store for worktree tracking
 	verbose        bool
 	dependencyMap  map[string][]string // taskID -> list of dependent task IDs
+	completedTasks map[string]bool     // taskID -> true if completed
+	taskInputMap   map[string]TaskInput // taskID -> original TaskInput for re-enqueue
 	dependencyMu   sync.RWMutex
 	webhooks       *webhooks.Manager // Webhook notification manager
 	analytics      *analytics.Manager // Analytics manager
@@ -315,7 +317,7 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueue(ctx dbos.DBOSContext, input Que
 
 	// Give the queue runner a moment to start processing workflows
 	log.Printf("⏸️  Giving queue runner a moment to start...")
-	time.Sleep(100 * time.Millisecond)
+	dbos.Sleep(o.dbosCtx, 100*time.Millisecond)
 
 	for _, handle := range handles {
 		log.Printf("⏳ Waiting for task result...")
@@ -392,7 +394,7 @@ func (o *DBOSOrchestrator) ExecuteTasksWithQueueDirectly(tasks []TaskInput) (Que
 
 	// Give the queue runner a moment to start processing workflows
 	log.Printf("⏸️  Giving queue runner a moment to start...")
-	time.Sleep(100 * time.Millisecond)
+	dbos.Sleep(o.dbosCtx, 100*time.Millisecond)
 
 	for _, handle := range handles {
 		log.Printf("⏳ Waiting for task result...")
@@ -439,34 +441,8 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	taskCtx, span := telemetry.StartTaskSpan(ctx, telemetry.SpanTaskExecute, taskAttrs...)
 	defer span.End()
 
-	// Record task claimed
-	telemetry.RecordTaskClaimed(taskCtx, "dbos-workflow", "")
-
-	// Broadcast task claimed to dashboard
-	dashboard.BroadcastTaskClaimed(task.TaskID, task.Title, "dbos-workflow")
-
-	// Emit webhook event
-	if o.webhooks != nil {
-		o.webhooks.EmitTaskClaimed(task.TaskID, task.Title, "dbos-workflow")
-	}
-
-	// Broadcast task started to dashboard
-	dashboard.BroadcastTaskStarted(task.TaskID, task.Title, "dbos-workflow")
-
-	// Emit webhook event
-	if o.webhooks != nil {
-		o.webhooks.EmitTaskStarted(task.TaskID, task.Title, "dbos-workflow")
-	}
-
-	// Record events
-	o.recordEvent(events.EventTaskClaimed, task.TaskID, task.EpicID, map[string]any{
-		"worker": "dbos-workflow",
-		"title":  task.Title,
-	})
-	o.recordEvent(events.EventTaskStarted, task.TaskID, task.EpicID, map[string]any{
-		"worker": "dbos-workflow",
-		"title":  task.Title,
-	})
+	// Broadcast task claimed + started via concurrent step (fire-and-forget)
+	o.broadcastTaskClaimed(ctx, taskCtx, task)
 
 	// Update task status to in_progress in database
 	if err := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusInProgress, ""); err != nil {
@@ -499,45 +475,56 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		errMsg := fmt.Sprintf("creating worktree: %v", err)
 		telemetry.RecordError(span, err, "WorktreeCreationError", telemetry.ErrorCategoryWorktree)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "worktree_error", 0)
-		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
-		if o.webhooks != nil {
-			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
-		}
-		if o.analytics != nil {
-			o.analytics.EndTask(task.TaskID, "failed", errMsg)
-		}
-		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
-			"error": errMsg,
-		})
-		// Update task status to failed in database
-		if updateErr := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusFailed, errMsg); updateErr != nil {
-			log.Printf("⚠️  Error updating task status to failed: %v", updateErr)
-		}
+		o.broadcastTaskFailed(ctx, task, errMsg, 0)
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
-	// Execute Claude Code (as a step for durability)
-	claudeResult, err := dbos.RunAsStep(ctx, func(stepCtx context.Context) (*executor.ExecutionResult, error) {
+	// Execute agent with durable timeout via dbos.Select race
+	// If Drover crashes and recovers, the timeout race replays from checkpoint
+	taskTimeout := o.config.TaskTimeout
+	if taskTimeout == 0 {
+		taskTimeout = 60 * time.Minute // safety default
+	}
+
+	// Start the agent execution step concurrently
+	taskCh, taskChErr := dbos.Go(ctx, func(stepCtx context.Context) (*executor.ExecutionResult, error) {
 		return o.executeClaudeStep(stepCtx, worktreePath, task, span)
 	}, dbos.WithStepMaxRetries(3))
+
+	// Start the durable timeout step concurrently
+	timeoutCh, timeoutChErr := dbos.Go(ctx, func(_ context.Context) (*executor.ExecutionResult, error) {
+		time.Sleep(taskTimeout)
+		return nil, fmt.Errorf("task %s timed out after %v", task.TaskID, taskTimeout)
+	})
+
+	// Check for channel creation errors
+	if taskChErr != nil {
+		errMsg := fmt.Sprintf("agent step error: %v", taskChErr)
+		telemetry.RecordError(span, taskChErr, "AgentStepCreationError", telemetry.ErrorCategoryAgent)
+		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "agent_error", 0)
+		o.broadcastTaskFailed(ctx, task, errMsg, 0)
+		return TaskResult{Success: false, Error: errMsg}, taskChErr
+	}
+	if timeoutChErr != nil {
+		// Timeout step failed to start — fall through without timeout protection
+		log.Printf("⚠️  Timeout step creation failed for task %s: %v (continuing without timeout)", task.TaskID, timeoutChErr)
+	}
+
+	// Race: first step to complete wins
+	var claudeResult *executor.ExecutionResult
+	if timeoutChErr == nil {
+		// Both channels available — race them
+		claudeResult, err = dbos.Select(ctx, []<-chan dbos.StepOutcome[*executor.ExecutionResult]{taskCh, timeoutCh})
+	} else {
+		// Only task channel available — wait directly
+		outcome := <-taskCh
+		claudeResult, err = outcome.Result, outcome.Err
+	}
 	if err != nil {
 		errMsg := fmt.Sprintf("agent error: %v", err)
 		telemetry.RecordError(span, err, "ClaudeExecutionError", telemetry.ErrorCategoryAgent)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "agent_error", 0)
-		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
-		if o.webhooks != nil {
-			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
-		}
-		if o.analytics != nil {
-			o.analytics.EndTask(task.TaskID, "failed", errMsg)
-		}
-		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
-			"error": errMsg,
-		})
-		// Update task status to failed in database
-		if updateErr := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusFailed, errMsg); updateErr != nil {
-			log.Printf("⚠️  Error updating task status to failed: %v", updateErr)
-		}
+		o.broadcastTaskFailed(ctx, task, errMsg, 0)
 		return TaskResult{Success: false, Error: errMsg}, err
 	}
 
@@ -545,16 +532,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		errMsg := claudeResult.Error.Error()
 		telemetry.RecordError(span, claudeResult.Error, "ClaudeTaskFailed", telemetry.ErrorCategoryAgent)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "agent_error", claudeResult.Duration)
-		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
-		if o.webhooks != nil {
-			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
-		}
-		if o.analytics != nil {
-			o.analytics.EndTask(task.TaskID, "failed", errMsg)
-		}
-		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
-			"error": errMsg,
-		})
+		o.broadcastTaskFailed(ctx, task, errMsg, 0)
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
@@ -570,16 +548,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		errMsg := fmt.Sprintf("committing: %v", err)
 		telemetry.RecordError(span, err, "CommitError", telemetry.ErrorCategoryGit)
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "commit_error", 0)
-		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
-		if o.webhooks != nil {
-			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
-		}
-		if o.analytics != nil {
-			o.analytics.EndTask(task.TaskID, "failed", errMsg)
-		}
-		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
-			"error": errMsg,
-		})
+		o.broadcastTaskFailed(ctx, task, errMsg, 0)
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
@@ -602,20 +571,7 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		errMsg := fmt.Sprintf("automated tests failed: %v", testErr)
 		telemetry.RecordError(span, testErr, "TestExecutionFailed", "tests")
 		telemetry.RecordTaskFailed(taskCtx, "dbos-workflow", "", "other", "test_error", 0)
-		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
-		if o.webhooks != nil {
-			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, 0)
-		}
-		if o.analytics != nil {
-			o.analytics.EndTask(task.TaskID, "failed", errMsg)
-		}
-		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
-			"error": errMsg,
-		})
-		// Update task status to failed in database
-		if updateErr := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusFailed, errMsg); updateErr != nil {
-			log.Printf("⚠️  Error updating task status to failed: %v", updateErr)
-		}
+		o.broadcastTaskFailed(ctx, task, errMsg, 0)
 		return TaskResult{
 			Success: false,
 			Output:  claudeResult.Output,
@@ -626,20 +582,8 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 	duration := time.Since(start)
 	log.Printf("✅ Task %s completed in %v", task.TaskID, duration)
 
-	// Broadcast task completed to dashboard
-	dashboard.BroadcastTaskCompleted(task.TaskID, task.Title)
-
-	// Emit webhook event
-	if o.webhooks != nil {
-		o.webhooks.EmitTaskCompleted(task.TaskID, task.Title, duration.Milliseconds())
-	}
-
-	// Record event
-	o.recordEvent(events.EventTaskCompleted, task.TaskID, task.EpicID, map[string]any{
-		"worker":   "dbos-workflow",
-		"title":    task.Title,
-		"duration": duration.Milliseconds(),
-	})
+	// Broadcast task completed via concurrent step (fire-and-forget)
+	o.broadcastTaskCompleted(ctx, taskCtx, task, duration, span)
 
 	// Parse and store structured outcome
 	outcome := outcomepkg.ParseOutput(claudeResult.Output)
@@ -652,15 +596,6 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 		log.Printf("⚠️  Error updating task status to completed: %v", err)
 	}
 
-	// End analytics tracking
-	if o.analytics != nil {
-		o.analytics.EndTask(task.TaskID, "success", "")
-	}
-
-	// Record task completion
-	telemetry.SetTaskStatus(span, "completed")
-	telemetry.RecordTaskCompleted(taskCtx, "dbos-workflow", "", "other", duration)
-
 	return TaskResult{
 		Success:    true,
 		Output:     claudeResult.Output,
@@ -670,9 +605,13 @@ func (o *DBOSOrchestrator) ExecuteTaskWorkflow(ctx dbos.DBOSContext, task TaskIn
 }
 
 // OnTaskComplete is called when a task completes and enqueues any dependent tasks
+// whose blockers are all resolved. Uses dbos.RunWorkflow with WithDelay for durable cascade.
 func (o *DBOSOrchestrator) OnTaskComplete(ctx dbos.DBOSContext, completedTaskID string) (int, error) {
 	o.dependencyMu.Lock()
 	defer o.dependencyMu.Unlock()
+
+	// Mark this task as completed
+	o.completedTasks[completedTaskID] = true
 
 	dependents, exists := o.dependencyMap[completedTaskID]
 	if !exists || len(dependents) == 0 {
@@ -683,13 +622,57 @@ func (o *DBOSOrchestrator) OnTaskComplete(ctx dbos.DBOSContext, completedTaskID 
 
 	enqueued := 0
 	for _, depID := range dependents {
-		// In a full implementation, we would check if ALL blockers are complete
-		// before enqueuing the dependent task. For this POC, we just enqueue it.
-		log.Printf("📤 Enqueuing dependent task %s", depID)
+		// Check if ALL blockers for this dependent are complete
+		if !o.allBlockersComplete(depID) {
+			log.Printf("⏳ Dependent task %s still has unresolved blockers", depID)
+			continue
+		}
+
+		// Look up the original task input
+		taskInput, ok := o.taskInputMap[depID]
+		if !ok {
+			log.Printf("⚠️  No task input found for dependent %s, skipping", depID)
+			continue
+		}
+
+		// Enqueue the now-ready task via durable workflow with delay
+		log.Printf("📤 All blockers resolved for %s, enqueuing with 500ms delay", depID)
+		if o.queue.Name != "" {
+			_, err := dbos.RunWorkflow(ctx, o.ExecuteTaskWorkflow, taskInput,
+				dbos.WithQueue(o.queue.Name),
+				dbos.WithDelay(500*time.Millisecond),
+			)
+			if err != nil {
+				log.Printf("❌ Failed to enqueue dependent task %s: %v", depID, err)
+				continue
+			}
+		} else {
+			_, err := dbos.RunWorkflow(ctx, o.ExecuteTaskWorkflow, taskInput)
+			if err != nil {
+				log.Printf("❌ Failed to start dependent task %s: %v", depID, err)
+				continue
+			}
+		}
+
 		enqueued++
 	}
 
 	return enqueued, nil
+}
+
+// allBlockersComplete checks whether all blockers for a given task are in the completedTasks set.
+// MUST be called while holding dependencyMu (read or write lock).
+func (o *DBOSOrchestrator) allBlockersComplete(taskID string) bool {
+	taskInput, ok := o.taskInputMap[taskID]
+	if !ok {
+		return false
+	}
+	for _, blockerID := range taskInput.BlockedBy {
+		if !o.completedTasks[blockerID] {
+			return false
+		}
+	}
+	return true
 }
 
 // buildDependencyMap builds a map of task IDs to their dependent tasks
@@ -698,12 +681,97 @@ func (o *DBOSOrchestrator) buildDependencyMap(tasks []TaskInput) {
 	defer o.dependencyMu.Unlock()
 
 	o.dependencyMap = make(map[string][]string)
+	o.completedTasks = make(map[string]bool)
+	o.taskInputMap = make(map[string]TaskInput)
 
 	for _, task := range tasks {
+		o.taskInputMap[task.TaskID] = task
 		for _, blockerID := range task.BlockedBy {
 			o.dependencyMap[blockerID] = append(o.dependencyMap[blockerID], task.TaskID)
 		}
 	}
+}
+
+// broadcastTaskClaimed handles all side-effects when a task is claimed.
+// Uses dbos.Go to run broadcasts concurrently (fire-and-forget).
+func (o *DBOSOrchestrator) broadcastTaskClaimed(ctx dbos.DBOSContext, taskCtx context.Context, task TaskInput) {
+	// Telemetry is lightweight and synchronous
+	telemetry.RecordTaskClaimed(taskCtx, "dbos-workflow", "")
+
+	// Fire-and-forget: dashboard, webhooks, events
+	dbos.Go(ctx, func(_ context.Context) (bool, error) {
+		dashboard.BroadcastTaskClaimed(task.TaskID, task.Title, "dbos-workflow")
+		dashboard.BroadcastTaskStarted(task.TaskID, task.Title, "dbos-workflow")
+
+		if o.webhooks != nil {
+			o.webhooks.EmitTaskClaimed(task.TaskID, task.Title, "dbos-workflow")
+			o.webhooks.EmitTaskStarted(task.TaskID, task.Title, "dbos-workflow")
+		}
+
+		o.recordEvent(events.EventTaskClaimed, task.TaskID, task.EpicID, map[string]any{
+			"worker": "dbos-workflow",
+			"title":  task.Title,
+		})
+		o.recordEvent(events.EventTaskStarted, task.TaskID, task.EpicID, map[string]any{
+			"worker": "dbos-workflow",
+			"title":  task.Title,
+		})
+
+		return true, nil
+	})
+}
+
+// broadcastTaskFailed handles all side-effects when a task fails.
+// Uses dbos.Go to run broadcasts concurrently (fire-and-forget).
+func (o *DBOSOrchestrator) broadcastTaskFailed(ctx dbos.DBOSContext, task TaskInput, errMsg string, durationMs int64) {
+	// Fire-and-forget: dashboard, webhooks, analytics, events, DB status update
+	dbos.Go(ctx, func(_ context.Context) (bool, error) {
+		dashboard.BroadcastTaskFailed(task.TaskID, task.Title, errMsg)
+
+		if o.webhooks != nil {
+			o.webhooks.EmitTaskFailed(task.TaskID, task.Title, errMsg, int(durationMs))
+		}
+		if o.analytics != nil {
+			o.analytics.EndTask(task.TaskID, "failed", errMsg)
+		}
+
+		o.recordEvent(events.EventTaskFailed, task.TaskID, task.EpicID, map[string]any{
+			"error": errMsg,
+		})
+
+		if updateErr := o.store.UpdateTaskStatus(task.TaskID, types.TaskStatusFailed, errMsg); updateErr != nil {
+			log.Printf("⚠️  Error updating task status to failed: %v", updateErr)
+		}
+
+		return true, nil
+	})
+}
+
+// broadcastTaskCompleted handles all side-effects when a task completes.
+// Uses dbos.Go to run broadcasts concurrently (fire-and-forget).
+func (o *DBOSOrchestrator) broadcastTaskCompleted(ctx dbos.DBOSContext, taskCtx context.Context, task TaskInput, duration time.Duration, span trace.Span) {
+	// Fire-and-forget: dashboard, webhooks, analytics, events, telemetry
+	dbos.Go(ctx, func(_ context.Context) (bool, error) {
+		dashboard.BroadcastTaskCompleted(task.TaskID, task.Title)
+
+		if o.webhooks != nil {
+			o.webhooks.EmitTaskCompleted(task.TaskID, task.Title, duration.Milliseconds())
+		}
+		if o.analytics != nil {
+			o.analytics.EndTask(task.TaskID, "success", "")
+		}
+
+		o.recordEvent(events.EventTaskCompleted, task.TaskID, task.EpicID, map[string]any{
+			"worker":   "dbos-workflow",
+			"title":    task.Title,
+			"duration": duration.Milliseconds(),
+		})
+
+		telemetry.SetTaskStatus(span, "completed")
+		telemetry.RecordTaskCompleted(taskCtx, "dbos-workflow", "", "other", duration)
+
+		return true, nil
+	})
 }
 
 // recordEvent records an event in the database
