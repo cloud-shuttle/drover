@@ -41,7 +41,7 @@ func New(cfg Config) (*Server, error) {
 	db := cfg.DB
 	if db == nil {
 		var err error
-		db, err = sql.Open("sqlite3", cfg.DatabaseURL)
+		db, err = sql.Open("sqlite", cfg.DatabaseURL)
 		if err != nil {
 			return nil, fmt.Errorf("open db: %w", err)
 		}

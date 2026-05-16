@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,6 +39,13 @@ type Stats struct {
 	SystemTotalMB   int64     `json:"system_total_mb"`
 	SystemAvailableMB int64   `json:"system_available_mb"`
 	SystemUsedPercent float64 `json:"system_used_percent"`
+}
+
+// SystemMemory represents system-wide memory information
+type SystemMemory struct {
+	TotalMB       int64   `json:"total_mb"`
+	AvailableMB   int64   `json:"available_mb"`
+	UsedPercent   float64 `json:"used_percent"`
 }
 
 // NewTracker creates a new memory tracker
@@ -170,91 +176,6 @@ func (t *Tracker) Start() {
 	}()
 }
 
-// GetProcessMemory retrieves memory usage for a process by PID
-func GetProcessMemory(pid int) (*WorkerMemory, error) {
-	// On Linux, read from /proc/[pid]/statm
-	statmPath := filepath.Join("/proc", strconv.Itoa(pid), "statm")
-	data, err := os.ReadFile(statmPath)
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", statmPath, err)
-	}
-
-	fields := strings.Fields(string(data))
-	if len(fields) < 2 {
-		return nil, fmt.Errorf("invalid statm format")
-	}
-
-	// statm format: rss pages, vms pages (in pagesize)
-	// We need to get the page size
-	pageSize := int64(os.Getpagesize())
-
-	rssPages, err := strconv.ParseInt(fields[1], 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("parsing rss: %w", err)
-	}
-
-	vmsPages, err := strconv.ParseInt(fields[0], 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("parsing vms: %w", err)
-	}
-
-	return &WorkerMemory{
-		PID:      pid,
-		RSSBytes: rssPages * pageSize,
-		VMSBytes: vmsPages * pageSize,
-	}, nil
-}
-
-// SystemMemory represents system-wide memory information
-type SystemMemory struct {
-	TotalMB       int64   `json:"total_mb"`
-	AvailableMB   int64   `json:"available_mb"`
-	UsedPercent   float64 `json:"used_percent"`
-}
-
-// GetSystemMemory retrieves system-wide memory information
-func GetSystemMemory() (*SystemMemory, error) {
-	// Read /proc/meminfo on Linux
-	data, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return nil, fmt.Errorf("reading /proc/meminfo: %w", err)
-	}
-
-	lines := strings.Split(string(data), "\n")
-	meminfo := make(map[string]int64)
-
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		key := strings.TrimSuffix(fields[0], ":")
-		value, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			continue
-		}
-		meminfo[key] = value
-	}
-
-	// Get values in KB, convert to MB
-	totalKB := meminfo["MemTotal"]
-	availableKB := meminfo["MemAvailable"]
-	if availableKB == 0 {
-		// Fallback for older kernels: MemAvailable = MemFree + Buffers + Cached
-		availableKB = meminfo["MemFree"] + meminfo["Buffers"] + meminfo["Cached"]
-	}
-
-	totalMB := totalKB / 1024
-	availableMB := availableKB / 1024
-	usedPercent := float64(totalKB-availableKB) / float64(totalKB) * 100
-
-	return &SystemMemory{
-		TotalMB:     totalMB,
-		AvailableMB: availableMB,
-		UsedPercent: usedPercent,
-	}, nil
-}
-
 // GetPID returns the PID of the current process
 func GetPID() int {
 	return os.Getpid()
@@ -302,3 +223,4 @@ func FormatBytes(bytes int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
+

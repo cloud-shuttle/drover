@@ -302,21 +302,29 @@ func (wm *WorktreeManager) Cleanup() error {
 		return nil // No worktrees to clean
 	}
 
+	// Resolve worktreeDir to real path (handles macOS /var -> /private/var symlinks)
+	realWorktreeDir, err := filepath.EvalSymlinks(wm.worktreeDir)
+	if err != nil {
+		realWorktreeDir = wm.worktreeDir
+	}
+
 	// Parse and remove each worktree
 	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
-		if len(line) == 0 {
+		if !strings.HasPrefix(line, "worktree ") {
 			continue
 		}
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
+		worktreePath := strings.TrimPrefix(line, "worktree ")
+
+		// Resolve the worktree path too
+		realWorktreePath, err := filepath.EvalSymlinks(worktreePath)
+		if err != nil {
+			realWorktreePath = worktreePath
 		}
-		worktreePath := parts[1]
 
 		// Only remove worktrees in our directory
-		if filepath.Dir(worktreePath) == wm.worktreeDir || filepath.HasPrefix(worktreePath, wm.worktreeDir+"/") {
-			cmd := exec.Command("git", "worktree", "remove", worktreePath)
+		if strings.HasPrefix(realWorktreePath, realWorktreeDir+"/") {
+			cmd := exec.Command("git", "worktree", "remove", "--force", worktreePath)
 			cmd.Dir = wm.baseDir
 			_ = cmd.Run() // Ignore errors
 		}

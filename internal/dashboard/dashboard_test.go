@@ -46,6 +46,7 @@ func newTestDB(t *testing.T) *sql.DB {
 		last_error TEXT,
 		claimed_by TEXT,
 		claimed_at INTEGER,
+		operator TEXT DEFAULT '',
 		created_at INTEGER NOT NULL,
 		updated_at INTEGER NOT NULL
 	);
