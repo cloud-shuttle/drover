@@ -1,0 +1,63 @@
+name: Quality Gate (manual)
+
+# Standalone quality gate workflow for on-demand audits.
+# Useful for:
+#   - Pre-release compliance checks on main
+#   - Testing a lower CRAP limit before enforcing it in ci.yml
+#   - Ad-hoc audits during refactoring sprints
+#
+# Generates its own coverage profile so it can run independently
+# without waiting for a ci.yml artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "CRAP score limit (default: 10000, target ceiling: 30)"
+        default: "10000"
+        required: false
+      ref:
+        description: "Git ref to check out (default: current branch)"
+        default: ""
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Generate a fresh coverage profile on this ref.
+      - name: Test with coverage
+        run: |
+          go test ./... \
+            -count=1 \
+            -timeout 300s \
+            -coverprofile=coverage.out \
+            -covermode=atomic
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run quality gate
+        run: |
+          echo "Scanning with CRAP limit: ${{ github.event.inputs.limit || '10000' }}"
+          python3 scripts/quality-gate.py . \
+            --coverage coverage.out \
+            --limit "${{ github.event.inputs.limit || '10000' }}"

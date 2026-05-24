@@ -31,10 +31,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install validator dependencies
-        run: pip install pyyaml jsonschema
+      # Cache pip downloads so pyyaml + jsonschema are not re-fetched on every run.
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-frontmatter-v1
+          restore-keys: |
+            ${{ runner.os }}-pip-frontmatter-
 
-      - name: Validate changed docs
+      - name: Install validator dependencies
+        run: pip install --quiet pyyaml jsonschema
+
+      - name: Validate changed docs (PR)
+        if: github.event_name == 'pull_request'
         run: |
           BASE="${{ github.event.pull_request.base.sha }}"
           if [[ -z "$BASE" ]]; then
@@ -45,8 +55,14 @@ jobs:
             --base-ref "$BASE" \
             --scope 'docs/**'
 
-      - name: Validate all docs on main
+      # On push to main: validate all docs, not just the changed set.
+      # Uses the shell wrapper which handles the full-repo scan.
+      - name: Validate all docs (push to main)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           mapfile -t FILES < <(find docs -type f \( -name '*.md' -o -name '*.mdx' \) | sort)
+          if [[ ${#FILES[@]} -eq 0 ]]; then
+            echo "No markdown files found under docs/ — skipping."
+            exit 0
+          fi
           python3 scripts/validate-content-frontmatter.py "${FILES[@]}"
