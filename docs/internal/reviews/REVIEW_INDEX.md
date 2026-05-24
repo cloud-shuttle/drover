@@ -1,3 +1,13 @@
+---
+title: Drover feat/v030 Branch - Review Documentation Index
+description: Drover feat/v030 Branch - Review Documentation Index
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover feat/v030 Branch - Review Documentation Index
 
 **Review Date:** 2026-01-15  

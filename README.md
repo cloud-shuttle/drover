@@ -77,82 +77,22 @@ go build -o drover ./cmd/drover
 go install github.com/cloud-shuttle/drover/cmd/drover@latest
 ```
 
-## Commands
+## CLI Reference
+
+Drover provides a powerful command line interface to manage your backlog, orchestrate parallel execution cycles, view real-time status updates, and configure multiplayer environments.
+
+For the full, production-grade technical specification of all commands, subcommands, and flags, please see the **[Command Line Interface (CLI) Reference](docs/reference/cli.md)**.
+
+### Core Commands Cheat Sheet
 
 | Command | Description |
-|---------|-------------|
-| `drover init` | Initialize Drover in current project |
-| `drover run` | Execute all tasks to completion |
-| `drover run --workers 8` | Run with 8 parallel agents |
-| `drover run --epic <id>` | Run only tasks in specific epic |
-| `drover add <title>` | Add a new task |
-| `drover add <title> --parent <id>` | Add a sub-task to parent |
-| `drover add "task-123.N title"` | Add sub-task with hierarchical syntax |
-| `drover epic add <title>` | Create a new epic |
-| `drover status` | Show current project status |
-| `drover status --watch` | Live progress updates |
-| `drover status --tree` | Show hierarchical task tree |
-| `drover reset` | Reset all tasks back to ready |
-| `drover reset task-abc task-def` | Reset specific tasks by ID |
-| `drover reset --failed` | Reset all failed tasks |
-| `drover resume` | Resume interrupted workflows |
-| `drover worktree prune` | Clean up completed task worktrees |
-| `drover worktree prune -a` | Clean up all worktrees (incl. build artifacts) |
-| `drover import <file>` | Import tasks from a `.drover` export file |
-| `drover import-jsonl <file.jsonl>` | Import tasks from JSON Lines format |
-| `drover export [--format json]` | Export tasks to portable format |
-
-### Bulk Task Creation
-
-For importing multiple tasks at once, Drover provides several options:
-
-#### 1. JSONL Import (Native CLI)
-
-Use `drover import-jsonl` to import epics, stories, and tasks from JSON Lines format:
-
-```bash
-drover import-jsonl tasks.jsonl
-```
-
-JSONL format (one JSON object per line):
-```jsonl
-{"id": "EPIC-001", "type": "epic", "title": "Project Foundation", "description": "Set up infrastructure"}
-{"id": "STORY-001", "type": "story", "epic_id": "EPIC-001", "title": "Initialize Rust Workspace", "description": "Create workspace", "priority": 10}
-{"id": "TASK-001", "type": "task", "story_id": "STORY-001", "title": "Create cargo structure", "description": "Set up Cargo.toml", "priority": 5}
-```
-
-See `examples/gather-project.jsonl` for a complete example.
-
-**Priority values:**
-- Integer: 1-10 (higher = more urgent)
-- String: "critical" (10), "high" (7), "normal" (5), "low" (2)
-
-#### 2. AI-Powered Task Generation
-
-Use `drover spec` to generate epics and tasks from design specifications:
-
-```bash
-# Generate from a spec file
-drover spec design/spec.md
-
-# Generate from a folder of design docs
-drover spec design/
-
-# Preview without creating
-drover spec spec.md --dry-run
-```
-
-#### 3. Session Import/Export
-
-Export and import complete Drover sessions:
-
-```bash
-# Export current session
-drover export session.jsonl
-
-# Import on another machine
-drover import session.jsonl
-```
+|:---|:---|
+| `drover init` | Initialize a new local Drover workspace database |
+| `drover add "<title>"` | Create and register a task with backlog verification |
+| `drover run` | Launch the parallel AI execution engine to completion |
+| `drover status` | Show progression percentage, status, and task graphs |
+| `drover plan review` | Launch the interactive console to review pending plans |
+| `drover dashboard` | Launch the visual local web console server |
 
 ## Configuration
 
@@ -450,10 +390,12 @@ Drover is built on a pure Go stack:
 | Observability | OpenTelemetry v1.43 | Traces & metrics |
 
 **Documentation:**
-- [Documentation Index](./docs/index.md) - Complete documentation hub
+- [Documentation hub](./docs/README.md) - Diátaxis documentation index
 - [Design Docs](./design/DESIGN.md) - Detailed architecture documentation
 - [Spec Directory](./spec/) - Feature specifications
 - [Contributing](./CONTRIBUTING.md) - Contribution guidelines
+
+New pages under `docs/` require YAML frontmatter per the org [content taxonomy](../docs/taxonomy.yaml); validate with [`scripts/validate-content-frontmatter.sh`](scripts/validate-content-frontmatter.sh).
 
 ## Comparison
 

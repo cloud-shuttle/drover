@@ -1,0 +1,52 @@
+name: Content frontmatter
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "taxonomy/**"
+      - "scripts/validate-content-frontmatter.*"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "taxonomy/**"
+      - "scripts/validate-content-frontmatter.*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-frontmatter:
+    name: Validate docs frontmatter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install validator dependencies
+        run: pip install pyyaml jsonschema
+
+      - name: Validate changed docs
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          if [[ -z "$BASE" ]]; then
+            BASE="origin/main"
+          fi
+          python3 scripts/validate-content-frontmatter.py \
+            --changed-only \
+            --base-ref "$BASE" \
+            --scope 'docs/**'
+
+      - name: Validate all docs on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mapfile -t FILES < <(find docs -type f \( -name '*.md' -o -name '*.mdx' \) | sort)
+          python3 scripts/validate-content-frontmatter.py "${FILES[@]}"

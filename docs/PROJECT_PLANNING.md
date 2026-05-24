@@ -1,3 +1,13 @@
+---
+title: Project Planning with Drover
+description: Project Planning with Drover
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Project Planning with Drover
 
 This guide shows you how to start a new project using Drover with Claude to plan epics and tasks.

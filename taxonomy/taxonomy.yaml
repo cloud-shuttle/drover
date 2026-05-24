@@ -1,0 +1,241 @@
+# Drover org content taxonomy (controlled vocabulary)
+# Version: 1.0.0
+#
+# Backstage metadata for documentation and marketing pages across repos and
+# surfaces. This is NOT navigation or folder structure — see Diátaxis paths and
+# per-site nav for user-visible IA.
+#
+# Preferred terms align with CONTEXT-MAP.md and per-repo CONTEXT.md glossaries.
+# Use frontmatter fields defined in reference/content-frontmatter-schema.json.
+#
+# Governance: review quarterly or when adding a bounded context / public surface.
+# Add terms only when multiple pages will use them (avoid singularities).
+
+version: "1.0.0"
+updated: "2026-05-22"
+
+facets:
+
+  # Primary owning product / bounded context (maps to CONTEXT-MAP §Contexts).
+  product:
+    description: >
+      Which Drover product or platform scope owns this page. One primary value
+      per page. Use "platform" for org-wide docs (CONTEXT-MAP, milestones, ADRs
+      that span services).
+    required: true
+    cardinality: one
+    terms:
+      platform:
+        label: Platform (shared)
+        glossary: ../CONTEXT-MAP.md
+      drover-cloud:
+        label: Drover Cloud
+        repo: drover-cloud
+        glossary: ../drover-cloud/CONTEXT.md
+      drover-brain:
+        label: Drover Brain
+        repo: drover-brain
+        glossary: ../drover-brain/CONTEXT.md
+      drover-code:
+        label: Drover Code
+        repo: drover-code
+        glossary: ../drover-code/CONTEXT.md
+      drover-gateway:
+        label: Drover Gateway
+        repo: drover-gateway
+        glossary: ../drover-gateway/CONTEXT.md
+      drover-muster:
+        label: Drover Muster
+        repo: drover-muster
+        glossary: ../drover-muster/CONTEXT.md
+      drover-guard:
+        label: Drover Guard
+        repo: drover-guard
+        glossary: ../drover-guard/CONTEXT.md
+      drover-warden:
+        label: Drover Warden
+        repo: drover-warden
+        glossary: ../drover-warden/CONTEXT.md
+      drover-orchestrator:
+        label: Drover Orchestrator
+        repo: drover
+        glossary: ../drover/CONTEXT.md
+      drover-web:
+        label: Drover Web
+        repo: drover-sh
+        glossary: ../drover-sh/CONTEXT.md
+      drover-sqlforge:
+        label: Drover SQLForge
+        repo: drover-sqlforge
+        glossary: ../drover-sqlforge/CONTEXT.md
+      drover-ui-tokens:
+        label: Drover UI tokens
+        repo: drover-ui-tokens
+        glossary: explanation/drover-ui-tokens.md
+
+  # Intended reader (maps to CONTEXT-MAP §Shared terms actors).
+  audience:
+    description: >
+      Who this page is written for. One or more values. Prefer the narrowest
+      applicable audience; add a second only when the page genuinely serves both.
+    required: true
+    cardinality: one_or_more
+    terms:
+      evaluator:
+        label: Evaluator
+        description: Public prospect exploring the platform (no tenant yet).
+      member:
+        label: Member
+        description: Authenticated human in a customer org (Cloud console, Brain).
+      customer-admin:
+        label: Customer admin
+        description: Member who manages team, Git remotes, Brain settings, invites.
+      platform-operator:
+        label: Platform operator
+        description: Team operating multi-tenant SaaS (provision, gateway, infra).
+      agent:
+        label: Agent
+        description: Automated actor (Drover Code, Cloud job, MCP client).
+
+  # Diátaxis documentation type (+ ADR as a special explanation subtype).
+  doc_type:
+    description: >
+      Primary documentation mode per Diátaxis. Usually inferred from file path
+      (docs/tutorials/, docs/how-to/, etc.) but MUST be set explicitly when path
+      does not match (Mintlify nav, drover-sh/docs/, root README).
+    required: true
+    cardinality: one
+    terms:
+      tutorial:
+        label: Tutorial
+        diataxis_path: docs/tutorials/
+      how-to:
+        label: How-to guide
+        diataxis_path: docs/how-to/
+      reference:
+        label: Reference
+        diataxis_path: docs/reference/
+      explanation:
+        label: Explanation
+        diataxis_path: docs/explanation/
+      adr:
+        label: Architecture decision record
+        diataxis_path: docs/adr/
+        notes: Decision log; explanation-oriented but tagged separately for retrieval.
+
+  # Optional subject-matter tags (keep shallow — max 2 levels in term id).
+  topic:
+    description: >
+      Cross-cutting subjects. Use sparingly; skip if product + doc_type are enough.
+      Prefer existing terms before proposing new ones in governance review.
+    required: false
+    cardinality: zero_or_more
+    terms:
+      security:
+        label: Security
+      provisioning:
+        label: Provisioning & lifecycle
+      tenancy:
+        label: Tenancy & isolation
+      identity-auth:
+        label: Identity & authentication
+      agent-jobs:
+        label: Agent jobs & execution
+      knowledge-indexing:
+        label: Knowledge indexing & search
+      mcp:
+        label: MCP & tool calling
+      llm-routing:
+        label: LLM routing & providers
+      observability:
+        label: Observability & logging
+      governance-policy:
+        label: Governance, policy & audit
+      data-warehousing:
+        label: Data warehousing & SQLForge
+      deployment:
+        label: Deployment & operations
+      documentation:
+        label: Documentation & information architecture
+
+  # Where the page is published (orthogonal to product ownership).
+  surface:
+    description: >
+      Public or internal surface hosting this content. Optional when obvious
+      from repo (repo-docs). Required for drover-sh hub pages that link outward.
+    required: false
+    cardinality: zero_or_one
+    terms:
+      drover-web:
+        label: Drover Web
+        host: drover.sh
+      cloud-console:
+        label: Cloud console
+        host: app.drover.sh
+      gateway-admin:
+        label: Gateway admin UI
+      repo-docs:
+        label: Repository docs tree
+      mintlify:
+        label: Mintlify site (drover-gateway/docs)
+
+# Non-preferred labels → canonical facet term (thesaurus / synonym control).
+synonyms:
+  product:
+    tenant: platform
+    bifrost: drover-gateway
+    drover-sh: drover-web
+    drover: drover-orchestrator
+    orchestrator: drover-orchestrator
+    sqlforge: drover-sqlforge
+    brain: drover-brain
+    cloud: drover-cloud
+    gateway: drover-gateway
+    muster: drover-muster
+    guard: drover-guard
+    warden: drover-warden
+    code: drover-code
+  audience:
+    admin: customer-admin
+    customer-administrator: customer-admin
+    operator: platform-operator
+    prospect: evaluator
+    developer: member
+    engineer: member
+    automation: agent
+  doc_type:
+    guide: how-to
+    howto: how-to
+    how_to: how-to
+    decision-record: adr
+    architecture-decision: adr
+  topic:
+    auth: identity-auth
+    zitadel: identity-auth
+    rbac: governance-policy
+    rebac: governance-policy
+    hitl: governance-policy
+    git-sync: knowledge-indexing
+    embeddings: knowledge-indexing
+    virtual-keys: governance-policy
+    providers: llm-routing
+    routing: llm-routing
+    unikernel: deployment
+    ukc: deployment
+  surface:
+    marketing: drover-web
+    console: cloud-console
+    app: cloud-console
+
+# Path-based defaults when frontmatter omits doc_type (Brain sync / CI may apply).
+path_inference:
+  - pattern: "**/docs/tutorials/**"
+    doc_type: tutorial
+  - pattern: "**/docs/how-to/**"
+    doc_type: how-to
+  - pattern: "**/docs/reference/**"
+    doc_type: reference
+  - pattern: "**/docs/explanation/**"
+    doc_type: explanation
+  - pattern: "**/docs/adr/**"
+    doc_type: adr

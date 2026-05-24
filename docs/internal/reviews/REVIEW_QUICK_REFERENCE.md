@@ -1,3 +1,13 @@
+---
+title: Drover feat/v030 - Quick Reference Card
+description: Drover feat/v030 - Quick Reference Card
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover feat/v030 - Quick Reference Card
 
 **Branch:** `origin/feat/v030` | **Date:** 2026-01-15 | **Status:** 🔴 **NEEDS REVISION**

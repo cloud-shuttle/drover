@@ -1,3 +1,13 @@
+---
+title: Branch Review Summary
+description: Branch Review Summary
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Branch Review Summary
 
 **Date:** 2026-01-14  

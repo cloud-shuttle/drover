@@ -1,7 +1,17 @@
+---
+title: Drover Architecture Diagram
+description: Drover Architecture Diagram
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover Architecture Diagram
 
 **Navigation:**
-- [Documentation Index](../docs/index.md) - Central documentation hub
+- [Documentation hub](../README.md) - Diátaxis documentation index
 - [Durable Workflows Spec](../spec/durable-workflows.md) - Workflow engine specification
 - [Design Overview](./DESIGN.md) - Comprehensive design document
 - [State Machine](./state-machine.md) - Task state transitions

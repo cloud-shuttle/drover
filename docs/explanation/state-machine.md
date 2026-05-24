@@ -1,7 +1,17 @@
+---
+title: Task State Machine
+description: Task State Machine
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Task State Machine
 
 **Navigation:**
-- [Documentation Index](../docs/index.md) - Central documentation hub
+- [Documentation hub](../README.md) - Diátaxis documentation index
 - [Design Overview](./DESIGN.md) - Comprehensive design document
 - [Architecture Diagrams](./architecture.md) - System architecture
 - [Sequence Diagrams](./sequence.md) - Runtime flow

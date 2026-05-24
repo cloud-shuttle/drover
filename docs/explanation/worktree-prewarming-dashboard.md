@@ -1,3 +1,13 @@
+---
+title: Drover Improvements Design Document
+description: Drover Improvements Design Document
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover Improvements Design Document
 
 **Version:** 1.0

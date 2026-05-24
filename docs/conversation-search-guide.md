@@ -1,3 +1,13 @@
+---
+title: Conversation Search with FTS5
+description: Conversation Search with FTS5
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Conversation Search with FTS5
 
 This guide covers how to search and query persisted conversations using SQLite's FTS5 (Full-Text Search) functionality.

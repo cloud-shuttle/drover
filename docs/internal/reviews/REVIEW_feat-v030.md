@@ -1,3 +1,13 @@
+---
+title: "Review: `feat/v030` (New planning docs + task loader scripts)"
+description: "Review: `feat/v030` (New planning docs + task loader scripts)"
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Review: `feat/v030` (New planning docs + task loader scripts)
 
 **Review date:** 2026-01-15  

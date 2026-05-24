@@ -1,3 +1,13 @@
+---
+title: "Branch Review: Feature Design & Implementation Analysis"
+description: "Branch Review: Feature Design & Implementation Analysis"
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Branch Review: Feature Design & Implementation Analysis
 
 **Date:** 2026-01-14  

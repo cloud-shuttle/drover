@@ -4,7 +4,7 @@ Welcome, AI Agent. This document provides context, architecture, and instruction
 
 ## Ecosystem Role
 
-> **Part of the Drover Ecosystem**: `drover` acts as the **Parallel Orchestrator**. It manages workflows, breaks down tasks, and parallelizes execution by spanning multiple instances of the core engine (`drover-code`) inside the execution sandbox (`drover-cloud`).
+> **Part of the Drover Ecosystem**: `drover` is **Drover Orchestrator**—parallel **task** dispatch in Git worktrees via DBOS. It invokes **Drover Code** (and other agents) locally per **worktree run**. Milestone A hosted path: **Drover Cloud** runs single **agent jobs** on workers; Orchestrator is self-hosted and out of scope until a future platform integration. Glossary: [`CONTEXT.md`](CONTEXT.md), [`../CONTEXT-MAP.md`](../CONTEXT-MAP.md).
 
 ## Project Overview
 

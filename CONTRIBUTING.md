@@ -1,7 +1,7 @@
 # Contributing to Drover
 
 **Navigation:**
-- [Documentation Index](./docs/index.md) - Complete documentation hub
+- [Documentation hub](./docs/README.md) - Diátaxis documentation index
 - [Feature Specifications](./spec/) - Detailed feature specifications
 - [Design Documents](./design/) - Architecture and design decisions
 

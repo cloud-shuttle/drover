@@ -1,3 +1,13 @@
+---
+title: End-to-End Testing Plan for Drover Features
+description: End-to-End Testing Plan for Drover Features
+product: drover-orchestrator
+audience: platform-operator
+doc_type: how-to
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # End-to-End Testing Plan for Drover Features
 
 **Date:** 2026-01-14  

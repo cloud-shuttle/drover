@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://drover.sh/schemas/content-frontmatter/v1",
+  "title": "Drover content frontmatter",
+  "description": "YAML frontmatter for markdown/mdx pages indexed by Drover Brain and used for cross-site metadata consistency. Controlled vocabulary: ../taxonomy.yaml. Product language: ../../CONTEXT-MAP.md.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Page title. Overrides the filename-derived title in Brain pages.title."
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line summary for search, Mintlify, and link previews."
+    },
+    "product": {
+      "type": "string",
+      "description": "Primary owning product (taxonomy facet: product).",
+      "enum": [
+        "platform",
+        "drover-cloud",
+        "drover-brain",
+        "drover-code",
+        "drover-gateway",
+        "drover-muster",
+        "drover-guard",
+        "drover-warden",
+        "drover-orchestrator",
+        "drover-web",
+        "drover-sqlforge",
+        "drover-ui-tokens"
+      ]
+    },
+    "audience": {
+      "description": "Intended reader(s) (taxonomy facet: audience).",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "evaluator",
+            "member",
+            "customer-admin",
+            "platform-operator",
+            "agent"
+          ]
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "evaluator",
+              "member",
+              "customer-admin",
+              "platform-operator",
+              "agent"
+            ]
+          }
+        }
+      ]
+    },
+    "doc_type": {
+      "type": "string",
+      "description": "Diátaxis mode (taxonomy facet: doc_type). May be inferred from docs/<quadrant>/ path when omitted.",
+      "enum": ["tutorial", "how-to", "reference", "explanation", "adr"]
+    },
+    "topics": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "security",
+          "provisioning",
+          "tenancy",
+          "identity-auth",
+          "agent-jobs",
+          "knowledge-indexing",
+          "mcp",
+          "llm-routing",
+          "observability",
+          "governance-policy",
+          "data-warehousing",
+          "deployment",
+          "documentation"
+        ]
+      },
+      "description": "Optional cross-cutting subjects (taxonomy facet: topic)."
+    },
+    "surface": {
+      "type": "string",
+      "description": "Hosting surface when not obvious from repo layout.",
+      "enum": [
+        "drover-web",
+        "cloud-console",
+        "gateway-admin",
+        "repo-docs",
+        "mintlify"
+      ]
+    },
+    "icon": {
+      "type": "string",
+      "description": "Mintlify icon id (drover-gateway/docs only)."
+    },
+    "deprecated": {
+      "type": "boolean",
+      "description": "When true, exclude from related-content widgets; keep for redirects."
+    },
+    "canonical_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Authoritative URL when this file is a summary or mirror."
+    }
+  },
+  "required": ["product", "audience"],
+  "examples": [
+    {
+      "title": "Configure Zitadel for Brain",
+      "description": "Wire OIDC issuer and JWKS for member JWT validation in local and staging stacks.",
+      "product": "drover-brain",
+      "audience": ["platform-operator"],
+      "doc_type": "how-to",
+      "topics": ["identity-auth", "tenancy"]
+    },
+    {
+      "title": "Introduction to Drover Gateway",
+      "description": "Evaluator onboarding to the unified LLM gateway, routing, and governance stack.",
+      "product": "drover-gateway",
+      "audience": "evaluator",
+      "doc_type": "tutorial",
+      "topics": ["llm-routing", "mcp"],
+      "surface": "drover-web",
+      "canonical_url": "https://drover.sh/docs/getting-started/introduction"
+    },
+    {
+      "title": "Provisioner handoff via DBOS",
+      "product": "platform",
+      "audience": ["platform-operator", "member"],
+      "doc_type": "adr",
+      "topics": ["provisioning", "agent-jobs"]
+    }
+  ]
+}

@@ -1,3 +1,13 @@
+---
+title: Drover feat/v030 Branch - Comprehensive Review & E2E Analysis
+description: Drover feat/v030 Branch - Comprehensive Review & E2E Analysis
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover feat/v030 Branch - Comprehensive Review & E2E Analysis
 
 **Date:** 2026-01-15  

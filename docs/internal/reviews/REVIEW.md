@@ -1,3 +1,13 @@
+---
+title: Drover Feature Review & Design Compliance Analysis
+description: Drover Feature Review & Design Compliance Analysis
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover Feature Review & Design Compliance Analysis
 
 **Review Date:** January 15, 2026  

@@ -1,3 +1,13 @@
+---
+title: Drover Enhancement Proposals
+description: Drover Enhancement Proposals
+product: drover-orchestrator
+audience: platform-operator
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover Enhancement Proposals
 
 This document consolidates all proposed enhancements to Drover. Features are organized by epic with implementation status and effort estimates.
@@ -548,7 +558,7 @@ Based on learnings from Phases 1-3:
 
 - [Design Overview](DESIGN.md) - Core architecture
 - [Architecture Diagrams](architecture.md) - System architecture
-- [Documentation Index](../docs/index.md) - Complete documentation index
+- [Documentation hub](../README.md) - Complete documentation index
 
 ---
 

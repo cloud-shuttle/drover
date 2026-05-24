@@ -1,3 +1,13 @@
+---
+title: Drover feat/v030 - E2E Testing Checklist
+description: Drover feat/v030 - E2E Testing Checklist
+product: drover-orchestrator
+audience: platform-operator
+doc_type: how-to
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover feat/v030 - E2E Testing Checklist
 
 **Date:** 2026-01-15  

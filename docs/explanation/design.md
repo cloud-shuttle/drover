@@ -1,7 +1,19 @@
+---
+title: Drover Design Document
+description: Drover Design Document
+product: drover-orchestrator
+audience:
+  - platform-operator
+  - customer-admin
+doc_type: explanation
+topics:
+  - agent-jobs
+surface: repo-docs
+---
 # Drover Design Document
 
 **Navigation:**
-- [Documentation Index](../docs/index.md) - Central documentation hub
+- [Documentation hub](../README.md) - Diátaxis documentation index
 - [Feature Specifications](../spec/) - Detailed feature specs
 - [Architecture Diagrams](./architecture.md) - System architecture
 - [State Machine](./state-machine.md) - Task state transitions
