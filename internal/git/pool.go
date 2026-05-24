@@ -337,7 +337,10 @@ func (p *WorktreePool) FetchAll() <-chan FetchSyncResult {
 	worktreeCount := len(p.worktrees)
 	worktreesCopy := make([]*PooledWorktree, 0, worktreeCount)
 	for _, wt := range p.worktrees {
-		if wt.Path != "" && wt.State != StateDraining {
+		wt.mu.Lock()
+		skip := wt.Path == "" || wt.State == StateDraining
+		wt.mu.Unlock()
+		if !skip {
 			worktreesCopy = append(worktreesCopy, wt)
 		}
 	}
