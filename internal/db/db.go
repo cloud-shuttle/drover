@@ -1321,12 +1321,14 @@ func (s *Store) CompleteTask(taskID string) error {
 			continue
 		}
 
-		// If no remaining blockers, mark as ready
+		// If no remaining blockers, promote to ready — but only if still blocked.
+		// This guard makes CompleteTask idempotent: re-completing an already-done
+		// task will not corrupt dependents that have already progressed past blocked.
 		if remainingCount == 0 {
 			_, err = tx.Exec(`
 				UPDATE tasks
 				SET status = 'ready', updated_at = ?
-				WHERE id = ?
+				WHERE id = ? AND status = 'blocked'
 			`, now, depID)
 			if err != nil {
 				return err
