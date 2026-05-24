@@ -170,7 +170,7 @@ func (h *Hub) run() {
 
 		case event := <-h.broadcast:
 			msg, _ := json.Marshal(event)
-			h.mu.RLock()
+			h.mu.Lock()
 			for client := range h.clients {
 				select {
 				case client.send <- msg:
@@ -179,7 +179,7 @@ func (h *Hub) run() {
 					delete(h.clients, client)
 				}
 			}
-			h.mu.RUnlock()
+			h.mu.Unlock()
 		}
 	}
 }
