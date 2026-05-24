@@ -16,17 +16,17 @@ import (
 
 // JSONLRecord represents a single line in the JSONL file
 type JSONLRecord struct {
-	ID             string   `json:"id"`
-	Type           string   `json:"type"`
-	Title          string   `json:"title"`
-	Description    string   `json:"description"`
-	Priority       int      `json:"priority"`
-	PriorityStr    string   `json:"priority,omitempty"` // Alternative string priority
-	EpicID         string   `json:"epic_id,omitempty"`
-	StoryID        string   `json:"story_id,omitempty"`
-	StoryPoints    int      `json:"story_points,omitempty"`
-	EstimatedHours int      `json:"estimated_hours,omitempty"`
-	Labels         []string `json:"labels,omitempty"`
+	ID                 string   `json:"id"`
+	Type               string   `json:"type"`
+	Title              string   `json:"title"`
+	Description        string   `json:"description"`
+	Priority           int      `json:"priority"`
+	PriorityStr        string   `json:"priority_str,omitempty"` // Alternative string priority (e.g. "high", "critical")
+	EpicID             string   `json:"epic_id,omitempty"`
+	StoryID            string   `json:"story_id,omitempty"`
+	StoryPoints        int      `json:"story_points,omitempty"`
+	EstimatedHours     int      `json:"estimated_hours,omitempty"`
+	Labels             []string `json:"labels,omitempty"`
 	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 }
 
