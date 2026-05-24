@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -14,11 +16,16 @@ import (
 func TestWebhookManager(t *testing.T) {
 	m := NewManager()
 
-	// Create test server to receive webhooks
+	// Create test server to receive webhooks.
+	// mu guards receivedPayload and receivedHeaders which are written by the
+	// HTTP server goroutine and read by the test goroutine.
+	var mu sync.Mutex
 	var receivedPayload *Payload
 	receivedHeaders := make(map[string]string)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Capture headers
+		mu.Lock()
+		defer mu.Unlock()
 		for k, v := range r.Header {
 			if strings.HasPrefix(k, "X-Webhook-") || strings.HasPrefix(k, "X-") {
 				receivedHeaders[k] = v[0]
@@ -28,7 +35,9 @@ func TestWebhookManager(t *testing.T) {
 		// Decode payload
 		var payload Payload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			t.Fatalf("Failed to decode payload: %v", err)
+			t.Errorf("Failed to decode payload: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
 		}
 		receivedPayload = &payload
 
@@ -38,10 +47,10 @@ func TestWebhookManager(t *testing.T) {
 
 	// Register webhook
 	webhook := &Webhook{
-		ID:     "test-webhook",
-		URL:    server.URL,
-		Secret: "test-secret",
-		Events: []EventType{EventTaskCreated, EventTaskCompleted},
+		ID:      "test-webhook",
+		URL:     server.URL,
+		Secret:  "test-secret",
+		Events:  []EventType{EventTaskCreated, EventTaskCompleted},
 		Enabled: true,
 	}
 
@@ -59,26 +68,34 @@ func TestWebhookManager(t *testing.T) {
 	// Wait for delivery
 	time.Sleep(500 * time.Millisecond)
 
+	mu.Lock()
+	gotPayload := receivedPayload
+	gotHeaders := make(map[string]string, len(receivedHeaders))
+	for k, v := range receivedHeaders {
+		gotHeaders[k] = v
+	}
+	mu.Unlock()
+
 	// Verify payload
-	if receivedPayload == nil {
+	if gotPayload == nil {
 		t.Fatal("No payload received")
 	}
 
-	if receivedPayload.Event != EventTaskCreated {
-		t.Errorf("Expected event %s, got %s", EventTaskCreated, receivedPayload.Event)
+	if gotPayload.Event != EventTaskCreated {
+		t.Errorf("Expected event %s, got %s", EventTaskCreated, gotPayload.Event)
 	}
 
 	// Verify headers
-	if receivedHeaders["X-Webhook-Id"] != "test-webhook" {
-		t.Errorf("Expected X-Webhook-Id header 'test-webhook', got %s", receivedHeaders["X-Webhook-Id"])
+	if gotHeaders["X-Webhook-Id"] != "test-webhook" {
+		t.Errorf("Expected X-Webhook-Id header 'test-webhook', got %s", gotHeaders["X-Webhook-Id"])
 	}
 
-	if receivedHeaders["X-Webhook-Event"] != string(EventTaskCreated) {
-		t.Errorf("Expected X-Webhook-Event %s, got %s", EventTaskCreated, receivedHeaders["X-Webhook-Event"])
+	if gotHeaders["X-Webhook-Event"] != string(EventTaskCreated) {
+		t.Errorf("Expected X-Webhook-Event %s, got %s", EventTaskCreated, gotHeaders["X-Webhook-Event"])
 	}
 
 	// Verify signature
-	signature := receivedHeaders["X-Webhook-Signature"]
+	signature := gotHeaders["X-Webhook-Signature"]
 	if !strings.HasPrefix(signature, "sha256=") {
 		t.Errorf("Expected signature to start with 'sha256=', got %s", signature)
 	}
@@ -112,20 +129,25 @@ func TestWebhookSignature(t *testing.T) {
 func TestWebhookFiltering(t *testing.T) {
 	m := NewManager()
 
+	// receivedEvent is written by the HTTP handler goroutine and read by the
+	// test goroutine; guard with a mutex.
+	var mu sync.Mutex
 	var receivedEvent EventType
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload Payload
 		json.NewDecoder(r.Body).Decode(&payload)
+		mu.Lock()
 		receivedEvent = payload.Event
+		mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
 	// Register webhook that only listens to task.completed events
 	webhook := &Webhook{
-		ID:     "filtered-webhook",
-		URL:    server.URL,
-		Events: []EventType{EventTaskCompleted},
+		ID:      "filtered-webhook",
+		URL:     server.URL,
+		Events:  []EventType{EventTaskCompleted},
 		Enabled: true,
 	}
 
@@ -141,8 +163,11 @@ func TestWebhookFiltering(t *testing.T) {
 	m.EmitTaskCompleted("task-1", "Test", 1000)
 	time.Sleep(100 * time.Millisecond)
 
-	if receivedEvent != EventTaskCompleted {
-		t.Errorf("Expected only EventTaskCompleted to be delivered, got %s", receivedEvent)
+	mu.Lock()
+	got := receivedEvent
+	mu.Unlock()
+	if got != EventTaskCompleted {
+		t.Errorf("Expected only EventTaskCompleted to be delivered, got %s", got)
 	}
 }
 
@@ -190,9 +215,9 @@ func TestWebhookDeliveryHistory(t *testing.T) {
 func TestWebhookDisable(t *testing.T) {
 	m := NewManager()
 
-	var callCount int
+	var callCount atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
+		callCount.Add(1)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
@@ -211,8 +236,8 @@ func TestWebhookDisable(t *testing.T) {
 	m.EmitTaskCreated("task-1", "Test", "epic-1")
 	time.Sleep(100 * time.Millisecond)
 
-	if callCount != 1 {
-		t.Errorf("Expected 1 call while enabled, got %d", callCount)
+	if n := callCount.Load(); n != 1 {
+		t.Errorf("Expected 1 call while enabled, got %d", n)
 	}
 
 	// Disable webhook
@@ -222,8 +247,8 @@ func TestWebhookDisable(t *testing.T) {
 	m.EmitTaskCreated("task-2", "Test", "epic-2")
 	time.Sleep(100 * time.Millisecond)
 
-	if callCount != 1 {
-		t.Errorf("Expected no additional calls while disabled, got %d", callCount)
+	if n := callCount.Load(); n != 1 {
+		t.Errorf("Expected no additional calls while disabled, got %d", n)
 	}
 
 	// Re-enable
@@ -233,7 +258,7 @@ func TestWebhookDisable(t *testing.T) {
 	m.EmitTaskCreated("task-3", "Test", "epic-3")
 	time.Sleep(100 * time.Millisecond)
 
-	if callCount != 2 {
-		t.Errorf("Expected 2 calls total (before disable + after enable), got %d", callCount)
+	if n := callCount.Load(); n != 2 {
+		t.Errorf("Expected 2 calls total (before disable + after enable), got %d", n)
 	}
 }
