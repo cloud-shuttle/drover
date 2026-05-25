@@ -74,12 +74,23 @@ go test -cover ./...
 go test ./internal/workflow/...
 ```
 
-### Integration Tests
+### Integration & E2E Tests
 
-The `internal/executor` package has tests that use a mock Claude script. These tests verify:
+Our ecosystem uses **Testcontainers** for integration tests to dynamically spin up ephemeral dependencies (like ClickHouse or Postgres) rather than relying on static `docker-compose.yml` files.
+
+When writing integration tests:
+1. Use `github.com/testcontainers/testcontainers-go`.
+2. Do NOT hardcode `localhost` ports; dynamically inject the container's mapped port into your connection strings.
+3. Integration tests are automatically run as part of the nightly GitHub Actions E2E workflow matrix.
+
+The `internal/executor` package also has tests that use a mock Claude script. These tests verify:
 - Task execution with timeout
 - Error handling
 - Context cancellation
+
+### Property-Based Testing (PBT)
+
+We utilize `pgregory.net/rapid` to conduct Property-Based Testing on complex domain logic such as DAG schedulers and Graph topological sorts. When modifying these core engines, ensure you add or update `rapid` property tests to guarantee structural invariants across thousands of generated test cases.
 
 ### Observability Tests
 
@@ -115,6 +126,16 @@ golangci-lint run
 # Or use go vet
 go vet ./...
 ```
+
+### Quality Gates (CI/CD)
+
+All `drover-*` repositories enforce strict Quality Gates via GitHub Actions on every Pull Request and merge to `main`.
+1. **Build & Vet**: Code must compile and pass `go vet`.
+2. **Race Detector**: `go test -race ./...` is strictly enforced. No data races are permitted.
+3. **CRAP Score**: We enforce a Change Risk Anti-Patterns (CRAP) score threshold. New code must maintain or lower the CRAP score baseline.
+4. **Frontmatter Validation**: Any markdown documentation changes must pass frontmatter schema validation (`validate-content-frontmatter.py`).
+
+Do not bypass these checks. Ensure your local tests pass before submitting a Pull Request.
 
 ### Conventions
 

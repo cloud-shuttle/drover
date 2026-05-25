@@ -1,0 +1,72 @@
+name: Nightly Ecosystem E2E Smoke Tests
+
+on:
+  schedule:
+    # Run at 2:00 AM UTC every day
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Allow manual triggering for verification
+
+jobs:
+  ecosystem-smoke-test:
+    name: Nightly E2E Smoke Test (${{ matrix.repository }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        repository:
+          - drover
+          - drover-warden
+          - drover-code
+          - drover-sqlforge
+          - drover-cli
+          - drover-kelpies
+          - drover-muster
+          - drover-brain
+          - drover-cloud
+          - drover-ch-optimiser
+          - drover-guard
+          - drover-registry
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          repository: drover-org/${{ matrix.repository }}
+          # Use a PAT if repositories are private, else standard GITHUB_TOKEN works
+          # token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          check-latest: true
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download Dependencies
+        run: go mod download
+
+      - name: Build Binary (Dry Run)
+        run: |
+          if [ -d "cmd" ]; then
+            for cmd in ./cmd/*; do
+              if [ -d "$cmd" ]; then
+                go build -o /dev/null "$cmd"
+              fi
+            done
+          else
+            go build -o /dev/null ./...
+          fi
+
+      - name: Run All Tests (Including Integration & E2E)
+        env:
+          CGO_ENABLED: 1 # For race detector
+        run: go test -v -race ./...

@@ -1,0 +1,51 @@
+# 2026/05/24 19:32:58.682657 [TestProp_IdempotentCompletion] [rapid] draw n: 5
+# 2026/05/24 19:32:58.682662 [TestProp_IdempotentCompletion] [rapid] draw priority_0: 0
+# 2026/05/24 19:32:58.682663 [TestProp_IdempotentCompletion] [rapid] draw priority_1: 0
+# 2026/05/24 19:32:58.682664 [TestProp_IdempotentCompletion] [rapid] draw numdeps_1: 0
+# 2026/05/24 19:32:58.682664 [TestProp_IdempotentCompletion] [rapid] draw priority_2: 0
+# 2026/05/24 19:32:58.682667 [TestProp_IdempotentCompletion] [rapid] draw numdeps_2: 0
+# 2026/05/24 19:32:58.682668 [TestProp_IdempotentCompletion] [rapid] draw priority_3: 0
+# 2026/05/24 19:32:58.682668 [TestProp_IdempotentCompletion] [rapid] draw numdeps_3: 0
+# 2026/05/24 19:32:58.682668 [TestProp_IdempotentCompletion] [rapid] draw priority_4: 0
+# 2026/05/24 19:32:58.682670 [TestProp_IdempotentCompletion] [rapid] draw numdeps_4: 1
+# 2026/05/24 19:32:58.682670 [TestProp_IdempotentCompletion] [rapid] draw dep_4_0: 0
+# 2026/05/24 19:32:58.684567 [TestProp_IdempotentCompletion] [rapid] draw target_idx: 0
+# 2026/05/24 19:32:58.684686 [TestProp_IdempotentCompletion] VIOLATION P5: after idempotent complete, project is not fully-completed: &{Total:5 Ready:1 Claimed:0 InProgress:0 Paused:0 Blocked:0 Completed:4 Failed:0}
+# 
+v0.4.8#11395016716717913121
+0x0
+0x6b74f03291620
+0x4
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
+0x1
+0x0
+0x0
+0x0
+0x0
+0x0
+0x0
