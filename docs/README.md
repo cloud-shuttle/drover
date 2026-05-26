@@ -22,9 +22,9 @@ Documentation follows [Diátaxis](https://diataxis.fr/): four types of content f
 
 | Need | Type | Start here |
 |------|------|------------|
-| **Learn** by doing | Tutorial | [First parallel epic](tutorials/first-parallel-epic.md) |
-| **Accomplish** a task | How-to | [How-to guides](how-to/) *(coming soon)* |
-| **Look up** facts | Reference | [CLI reference](reference/cli.md) · [Feature specs](../spec/) |
+| **Learn** by doing | Tutorial | [First parallel epic](tutorials/first-parallel-epic.md) · [Resume after crash](tutorials/resume-after-crash.md) |
+| **Accomplish** a task | How-to | [How-to guides](how-to/) |
+| **Look up** facts | Reference | [CLI reference](reference/cli.md) · [Configuration](reference/configuration.md) · [Feature specs](../spec/) |
 | **Understand** concepts | Explanation | [Architecture overview](explanation/architecture.md) |
 
 ## Tutorials
@@ -32,15 +32,22 @@ Documentation follows [Diátaxis](https://diataxis.fr/): four types of content f
 Step-by-step lessons for newcomers.
 
 - [First parallel epic](tutorials/first-parallel-epic.md) — `drover init` → epic → blocked tasks → `drover run`
+- [Resume after crash](tutorials/resume-after-crash.md) — interrupt and recover with DBOS checkpoints
 
 ## How-to guides
 
-Goal-oriented recipes. *(Quadrant in progress)*
+Goal-oriented recipes.
+
+- [Configure agents](how-to/configure-agents.md) — Claude, Codex, Amp, OpenCode, worker subprocess isolation
+- [Planning vs building mode](how-to/planning-vs-building-mode.md) — plan review before implementation
+- [Set up PostgreSQL for production](how-to/set-up-postgres-production.md) — `DBOS_SYSTEM_DATABASE_URL`
+- [Route LLM traffic through Gateway](how-to/route-llm-through-gateway.md) — agent CLI env + local Gateway
 
 ## Reference
 
-- [Feature specifications](../spec/) — durable workflows, parallel execution, LLM proxy, webhooks, and more
 - [CLI reference](reference/cli.md)
+- [Configuration (environment variables)](reference/configuration.md)
+- [Feature specifications](../spec/)
 
 ## Explanation
 
