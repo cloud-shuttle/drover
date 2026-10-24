@@ -13,7 +13,7 @@ The canonical name for this product: a durable workflow engine that runs many co
 A named container for related **tasks** (e.g. “MVP Features”). Scheduling and progress roll up at epic scope; an **orchestrator run** may target one epic or the whole backlog.
 
 **Task**  
-One unit of agent work with status, priority, optional **blockers**, and optional hierarchical ids (e.g. `task-123.1`). A **task run** executes exactly one **task** to completion (with retries). Distinct from a hosted **agent job** (one remote worker contract run—see [`../drover-cloud/CONTEXT.md`](../drover-cloud/CONTEXT.md)).
+One unit of agent work with status, priority, optional **blockers**, and optional hierarchical ids (e.g. `task-123.1`). A **task run** executes exactly one **task** to completion (with retries). Distinct from a hosted **agent job** (one remote worker contract run—see [`../drover-cloud/CONTEXT.md`](../drover-cloud/CONTEXT.md)) and from an **issue run** (the backlog issue’s artifact record—see [`../CONTEXT-MAP.md`](../CONTEXT-MAP.md)). A task run may link to an issue run by id. It does not become one.
 
 **Blocker**  
 A dependency edge: task B is blocked until task A completes. The orchestrator enqueues B only when all blockers are satisfied.

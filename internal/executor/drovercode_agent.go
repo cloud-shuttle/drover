@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/sessionevent"
 	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"go.opentelemetry.io/otel/attribute"
@@ -93,6 +94,17 @@ func (a *DroverCodeAgent) ExecuteWithContext(ctx context.Context, worktreePath s
 
 	telemetry.RecordAgentPrompt(agentCtx, "drovercode")
 
+	eventsPath, sessionID := beginWorktreeSession(worktreePath, task)
+	finalStatus := "failed"
+	if eventsPath != "" {
+		defer func() {
+			ev := sessionevent.New(sessionevent.TypeStatus, sessionID, map[string]any{"status": finalStatus})
+			ev.IssueID = task.ID
+			ev.Phase = "execute"
+			_ = sessionevent.Append(eventsPath, ev)
+		}()
+	}
+
 	// Build the prompt (exact same logic as ClaudeAgent)
 	prompt := a.buildPrompt(task)
 
@@ -130,6 +142,15 @@ func (a *DroverCodeAgent) ExecuteWithContext(ctx context.Context, worktreePath s
 	}
 	if a.jsonl {
 		env = append(env, "DROVER_CODE_JSONL=1")
+	}
+	if eventsPath != "" {
+		env = append(env,
+			"DROVER_SESSION_EVENTS="+eventsPath,
+			"DROVER_SESSION_ID="+sessionID,
+			"DROVER_ISSUE_ID="+task.ID,
+			"DROVER_PHASE=execute",
+			"DROVER_SESSION_EVENTS_ENVELOPE=0",
+		)
 	}
 	if a.verbose {
 		env = append(env, "DROVER_CODE_VERBOSE=1")
@@ -199,6 +220,9 @@ func (a *DroverCodeAgent) ExecuteWithContext(ctx context.Context, worktreePath s
 
 	// Prefer structured result if available
 	if result, parseErr := a.readResultJSON(resultPath); parseErr == nil {
+		if result.Success {
+			finalStatus = "completed"
+		}
 		return &ExecutionResult{
 			Success:  result.Success,
 			Output:   result.Output,
@@ -206,11 +230,43 @@ func (a *DroverCodeAgent) ExecuteWithContext(ctx context.Context, worktreePath s
 		}
 	}
 
+	finalStatus = "completed"
 	return &ExecutionResult{
 		Success:  true,
 		Output:   fullOutput,
 		Duration: duration,
 	}
+}
+
+// beginWorktreeSession writes the issue-run envelope beside the worktree.
+// drover-code appends tool events to the same file and does not repeat the envelope.
+func beginWorktreeSession(worktreePath string, task *types.Task) (string, string) {
+	if worktreePath == "" || task == nil {
+		return "", ""
+	}
+	path := filepath.Join(worktreePath, ".drover", "session-events.jsonl")
+	sessionID := task.ID
+	if sessionID == "" {
+		sessionID = "worktree"
+	}
+	started := sessionevent.New(sessionevent.TypeStarted, sessionID, nil)
+	started.IssueID = task.ID
+	started.Phase = "execute"
+	if err := sessionevent.Append(path, started); err != nil {
+		return "", ""
+	}
+	linked := sessionevent.New(sessionevent.TypeLinked, sessionID, map[string]any{
+		"issue_id": task.ID,
+		"phase":    "execute",
+	})
+	linked.IssueID = task.ID
+	linked.Phase = "execute"
+	_ = sessionevent.Append(path, linked)
+	running := sessionevent.New(sessionevent.TypeStatus, sessionID, map[string]any{"status": "running"})
+	running.IssueID = task.ID
+	running.Phase = "execute"
+	_ = sessionevent.Append(path, running)
+	return path, sessionID
 }
 
 // readResultJSON parses the structured result written by --result-json / DROVER_CODE_RESULT_PATH
@@ -259,4 +315,3 @@ func (a *DroverCodeAgent) buildPrompt(task *types.Task) string {
 
 	return prompt.String()
 }
-
