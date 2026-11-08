@@ -66,7 +66,7 @@
 #     export UKC_TOKEN=...
 #     export UKC_REGION=fra
 #     export GATEWAY_PUBLIC_BASE_URL=https://gateway.prod.example.com
-#     export AGENT_JOBS_LLM_BASE_URL=https://gateway.prod.example.com/anthropic
+#     export AGENT_JOBS_LLM_BASE_URL=https://gateway.prod.example.com/v1
 #     export GUARD_PUBLIC_BASE_URL=https://guard.prod.example.com
 #     export MUSTER_PUBLIC_BASE_URL=https://muster.prod.example.com
 #     docker compose -f docker-compose.milestone-a.yml -f docker-compose.ukc.yml \
