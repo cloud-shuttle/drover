@@ -2755,6 +2755,7 @@ func (s *Store) SavePlan(plan *Plan) error {
 func (s *Store) GetPlan(planID string) (*Plan, error) {
 	var plan Plan
 	var approvedAt sql.NullInt64
+	var createdAt, updatedAt int64 // stored as Unix seconds by SavePlan
 
 	var stepsJSON, filesToCreateJSON, filesToModifyJSON, dependenciesJSON, riskFactorsJSON, feedbackJSON string
 
@@ -2770,7 +2771,7 @@ func (s *Store) GetPlan(planID string) (*Plan, error) {
 		&plan.EstimatedTime, &plan.Complexity, &riskFactorsJSON,
 		&plan.Status, &plan.ApprovedBy, &approvedAt, &plan.RejectionReason,
 		&plan.Revision, &plan.ParentPlanID, &feedbackJSON,
-		&plan.CreatedAt, &plan.UpdatedAt, &plan.CreatedBy,
+		&createdAt, &updatedAt, &plan.CreatedBy,
 	)
 
 	if err == sql.ErrNoRows {
@@ -2802,6 +2803,8 @@ func (s *Store) GetPlan(planID string) (*Plan, error) {
 
 	// Convert estimated_time from seconds to duration
 	plan.EstimatedTime = time.Duration(plan.EstimatedTime) * time.Second
+	plan.CreatedAt = time.Unix(createdAt, 0)
+	plan.UpdatedAt = time.Unix(updatedAt, 0)
 
 	if approvedAt.Valid {
 		t := time.Unix(approvedAt.Int64, 0)
@@ -3248,7 +3251,7 @@ func (cs *conversationStore) GetTurn(ctx context.Context, turnID string) (*types
 	`, turnID).Scan(
 		&turn.ID, &turn.ConversationID, &turn.TurnNumber, &turn.Role, &turn.Content,
 		&turn.ToolUseID, &turn.ToolName, &turn.ToolInput, &turn.ToolResult,
-		&turn.TokensUsed, &turn.CreatedAt,
+		&turn.TokensUsed, &turn.CreatedAt, &turn.Compressed,
 	)
 
 	if err == sql.ErrNoRows {
