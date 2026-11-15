@@ -53,6 +53,7 @@ handles failures gracefully, and guarantees progress through crashes and restart
 		addCmd(),
 		quickCmd(),
 		epicCmd(),
+		listCmd(),
 		infoCmd(),
 		statusCmd(),
 		watchCmd(),

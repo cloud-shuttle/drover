@@ -131,6 +131,29 @@ Register a new Epic category.
 * **Flags**:
   * `-d, --description`: A high-level description outlining the epic scope.
 
+##### `drover epic list`
+List every Epic with its ID, status, total task count and completed task count.
+* **Usage**: `drover epic list [flags]` (alias `drover epic ls`)
+* **Flags**:
+  * `--json`: Emit a JSON array of `{id, title, description, status, created_at, task_count, tasks_by_status}`.
+
+---
+
+### `drover list`
+
+List tasks after creation, optionally filtered by Epic and status.
+
+```bash
+drover list [flags]
+drover list --epic epic-101 --status ready
+```
+
+* **Alias**: `drover ls`
+* **Flags**:
+  * `-e, --epic`: Only tasks bound to this Epic ID. Errors if the Epic does not exist.
+  * `-s, --status`: Only tasks in this state: `ready`, `claimed`, `in_progress`, `paused`, `blocked`, `completed`, `failed`, `cancelled`.
+  * `--json`: Emit the matching tasks as a JSON array.
+
 ---
 
 ### `drover spec`

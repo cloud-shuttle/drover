@@ -89,6 +89,8 @@ For the full, production-grade technical specification of all commands, subcomma
 |:---|:---|
 | `drover init` | Initialize a new local Drover workspace database |
 | `drover add "<title>"` | Create and register a task with backlog verification |
+| `drover epic list` | List epics with IDs and task counts (`--json` available) |
+| `drover list` | List tasks, filtered by `--epic` and/or `--status` (`--json` available) |
 | `drover run` | Launch the parallel AI execution engine to completion |
 | `drover status` | Show progression percentage, status, and task graphs |
 | `drover plan review` | Launch the interactive console to review pending plans |

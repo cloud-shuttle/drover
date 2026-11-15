@@ -221,6 +221,6 @@ func epicCmd() *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	command.AddCommand(epicAdd)
+	command.AddCommand(epicAdd, epicListCmd())
 	return command
 }
