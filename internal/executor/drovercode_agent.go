@@ -14,7 +14,9 @@ import (
 	"strings"
 	"time"
 
+	ctxmngr "github.com/cloud-shuttle/drover/internal/context"
 	"github.com/cloud-shuttle/drover/internal/sessionevent"
+	"github.com/cloud-shuttle/drover/internal/taskcontext"
 	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"go.opentelemetry.io/otel/attribute"
@@ -29,6 +31,10 @@ type DroverCodeAgent struct {
 	timeout    time.Duration
 	verbose    bool
 	guidelines string
+
+	contextManager   *ctxmngr.Manager
+	recentTasks      []*types.Task
+	taskContextCount int
 
 	// drover-code specific options (can be set via SetDroverCodeConfig later)
 	resultJSONPath   string
@@ -56,6 +62,17 @@ func (a *DroverCodeAgent) SetVerbose(v bool) {
 // SetProjectGuidelines sets project-specific guidelines for the agent
 func (a *DroverCodeAgent) SetProjectGuidelines(guidelines string) {
 	a.guidelines = guidelines
+}
+
+// SetContextManager sets the context window manager for the agent
+func (a *DroverCodeAgent) SetContextManager(manager *ctxmngr.Manager) {
+	a.contextManager = manager
+}
+
+// SetTaskContext sets recent completed tasks for context carrying
+func (a *DroverCodeAgent) SetTaskContext(recentTasks []*types.Task, taskContextCount int) {
+	a.recentTasks = recentTasks
+	a.taskContextCount = taskContextCount
 }
 
 // SetDroverCodeConfig sets drover-code-specific options (call after NewDroverCodeAgent)
@@ -113,11 +130,18 @@ func (a *DroverCodeAgent) ExecuteWithContext(ctx context.Context, worktreePath s
 		log.Printf("Prompt preview: %s", truncateString(prompt, 200))
 	}
 
-	// Prepare result file (structured output)
+	// Prepare result file (structured output). By default it lives in a
+	// fresh temp dir outside the worktree: anything written inside the
+	// worktree would be picked up by `git add -A` and merged into main, and
+	// a per-run file can't be confused with a stale result from a retry.
 	resultPath := a.resultJSONPath
 	if resultPath == "" {
-		resultPath = filepath.Join(worktreePath, ".drover-result.json")
-		_ = os.MkdirAll(filepath.Dir(resultPath), 0755)
+		dir, err := os.MkdirTemp("", "drover-code-result-")
+		if err != nil {
+			return &ExecutionResult{Success: false, Error: fmt.Errorf("creating drover-code result dir: %w", err)}
+		}
+		defer os.RemoveAll(dir)
+		resultPath = filepath.Join(dir, "result.json")
 	}
 
 	// drover-code uses stdin for the prompt in headless mode (no -p flag needed)
@@ -245,6 +269,7 @@ func beginWorktreeSession(worktreePath string, task *types.Task) (string, string
 		return "", ""
 	}
 	path := filepath.Join(worktreePath, ".drover", "session-events.jsonl")
+	ensureSessionEventsIgnored(filepath.Dir(path))
 	sessionID := task.ID
 	if sessionID == "" {
 		sessionID = "worktree"
@@ -269,6 +294,22 @@ func beginWorktreeSession(worktreePath string, task *types.Task) (string, string
 	return path, sessionID
 }
 
+// ensureSessionEventsIgnored keeps the session-events file out of the task's
+// commit. The worktree is committed with `git add -A`, so without this the
+// events log would be merged into main. It writes a self-ignoring
+// .drover/.gitignore only when the repo doesn't already have one, so a
+// tracked .drover/.gitignore is never modified.
+func ensureSessionEventsIgnored(dir string) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return
+	}
+	p := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(p); err == nil {
+		return
+	}
+	_ = os.WriteFile(p, []byte("# Written by drover: per-run session artifacts, never committed\nsession-events.jsonl\n.gitignore\n"), 0644)
+}
+
 // readResultJSON parses the structured result written by --result-json / DROVER_CODE_RESULT_PATH
 func (a *DroverCodeAgent) readResultJSON(path string) (*AgentResult, error) {
 	data, err := os.ReadFile(path)
@@ -289,7 +330,8 @@ type AgentResult struct {
 	Version int    `json:"version,omitempty"`
 }
 
-// buildPrompt is copied verbatim from ClaudeAgent for 100% consistency
+// buildPrompt mirrors ClaudeAgent.buildPrompt (guidelines, task context,
+// human guidance, context-managed description)
 func (a *DroverCodeAgent) buildPrompt(task *types.Task) string {
 	var prompt strings.Builder
 
@@ -301,10 +343,32 @@ func (a *DroverCodeAgent) buildPrompt(task *types.Task) string {
 		prompt.WriteString("\n\n---\n\n")
 	}
 
+	// Inject recent task context if available (same as ClaudeAgent)
+	if a.taskContextCount > 0 && len(a.recentTasks) > 0 {
+		if taskContext := taskcontext.BuildContext(a.recentTasks, task, a.taskContextCount); taskContext != "" {
+			prompt.WriteString(taskContext)
+		}
+	}
+
+	// Human guidance (drover hint) if present (same as ClaudeAgent)
+	if task.ExecutionContext != nil && len(task.ExecutionContext.Guidance) > 0 {
+		prompt.WriteString("=== HUMAN GUIDANCE ===\n")
+		prompt.WriteString("The following guidance has been provided for this task:\n\n")
+		for i, msg := range task.ExecutionContext.Guidance {
+			prompt.WriteString(fmt.Sprintf("[%d] %s\n", i+1, msg.Message))
+		}
+		prompt.WriteString("======================\n\n")
+	}
+
 	prompt.WriteString(fmt.Sprintf("Task: %s\n", task.Title))
 
 	if task.Description != "" {
-		prompt.WriteString(fmt.Sprintf("Description: %s\n", task.Description))
+		if a.contextManager != nil && a.contextManager.ContentTooLarge(ctxmngr.ContentTypeDescription, task.Description) {
+			prompt.WriteString("\nDescription: [Content size exceeds threshold, using reference format]\n")
+			prompt.WriteString(a.contextManager.ManageDescription(task.Description))
+		} else {
+			prompt.WriteString(fmt.Sprintf("Description: %s\n", task.Description))
+		}
 	}
 
 	prompt.WriteString("\nPlease implement this task completely.")

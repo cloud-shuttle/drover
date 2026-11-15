@@ -95,7 +95,7 @@ description: |
 # Customize these settings for your project
 
 # Agent configuration
-agent = "claude"          # Options: claude, codex, amp, opencode
+agent = "claude"          # Options: claude, codex, amp, opencode, drovercode
 max_workers = 4          # Number of parallel workers
 task_timeout = "60m"     # Maximum time per task
 max_attempts = 3         # Retry attempts for failed tasks

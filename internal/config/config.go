@@ -35,7 +35,7 @@ type Config struct {
 	WorktreeDir string
 
 	// Agent settings
-	AgentType  string  // "claude", "codex", or "amp"
+	AgentType  string  // "claude", "codex", "amp", "opencode" or "drovercode"
 	AgentPath  string  // path to agent binary
 	ClaudePath string  // deprecated: use AgentPath instead
 
@@ -300,16 +300,10 @@ func Load() (*Config, error) {
 		cfg.MailboxOrphanScanMinutes = parseIntOrDefault(v, 5)
 	}
 
-	// Resolve AgentPath based on AgentType if not explicitly set
-	if cfg.AgentPath == "claude" && cfg.AgentType != "claude" {
-		// AgentPath wasn't explicitly set, use default for the agent type
-		switch cfg.AgentType {
-		case "codex":
-			cfg.AgentPath = "codex"
-		case "amp":
-			cfg.AgentPath = "amp"
-		}
-	}
+	// Resolve AgentPath based on AgentType if not explicitly set, so that
+	// e.g. agent "opencode" runs `opencode` rather than the claude default.
+	cfg.AgentType = NormalizeAgentType(cfg.AgentType)
+	cfg.AgentPath = ResolveAgentPath(cfg.AgentType, cfg.AgentPath)
 
 	return cfg, nil
 }
