@@ -53,6 +53,11 @@ const (
 	SpanGitCommit    = "drover.git.commit"
 	SpanGitPush      = "drover.git.push"
 	SpanGitMerge     = "drover.git.merge"
+
+	// SpanGitEnsureMain covers preparing an empty repository (initial commit on main).
+	SpanGitEnsureMain = "drover.git.ensure_main"
+	// SpanGitWorktreeMerge covers merging a task worktree branch into main.
+	SpanGitWorktreeMerge = "drover.git.worktree_merge"
 )
 
 // StartWorkflowSpan starts a span for workflow execution
@@ -226,4 +231,9 @@ func RecordTestFailed(span trace.Span, passed, failed, skipped int, duration tim
 		attribute.String("test.error", errorMsg),
 	))
 	span.SetStatus(codes.Error, "tests failed")
+}
+
+// StartGitSpan starts a span for a git operation.
+func StartGitSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
+	return tracer.Start(ctx, name, trace.WithAttributes(attrs...))
 }

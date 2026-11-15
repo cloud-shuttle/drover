@@ -102,3 +102,10 @@ func EpicAttrs(epicID string) []attribute.KeyValue {
 		attribute.String(KeyEpicID, epicID),
 	}
 }
+
+// Git operation attribute keys
+const (
+	KeyGitBranch            = "git.branch"
+	KeyRepoHadCommits       = "repo.had_commits"
+	KeyGitCreatedInitCommit = "drover.git.created_initial_commit"
+)

@@ -2,6 +2,7 @@
 package git
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"log"
@@ -11,7 +12,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // Global mutex to serialize MergeToMain operations across all workers
@@ -47,6 +50,12 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 	// Ensure worktree directory exists
 	if err := os.MkdirAll(wm.worktreeDir, 0755); err != nil {
 		return "", fmt.Errorf("creating worktree directory: %w", err)
+	}
+
+	// Empty repositories have nothing to branch from; give them a root
+	// commit on main first so task branches share history with main.
+	if _, err := wm.EnsureMainBranch(); err != nil {
+		return "", fmt.Errorf("preparing empty repository: %w", err)
 	}
 
 	// Clean up any existing worktree/branch at this path first
@@ -243,6 +252,25 @@ func (wm *WorktreeManager) Commit(taskID, message string) (bool, error) {
 
 // MergeToMain merges the worktree changes to main branch
 func (wm *WorktreeManager) MergeToMain(taskID string) error {
+	return wm.MergeToMainContext(context.Background(), taskID)
+}
+
+// MergeToMainContext is MergeToMain with a parent context for tracing. It
+// records a drover.git.worktree_merge span with the task ID and whether
+// the repository had any history.
+func (wm *WorktreeManager) MergeToMainContext(ctx context.Context, taskID string) (err error) {
+	_, span := telemetry.StartGitSpan(ctx, telemetry.SpanGitWorktreeMerge,
+		attribute.String(telemetry.KeyTaskID, taskID),
+		attribute.String(telemetry.KeyGitBranch, mainBranch),
+		attribute.Bool(telemetry.KeyRepoHadCommits, repoHasCommits(wm.baseDir)))
+	defer func() {
+		telemetry.RecordErrorWithStatus(span, err, "git", "merge")
+		span.End()
+	}()
+	return wm.mergeToMain(taskID)
+}
+
+func (wm *WorktreeManager) mergeToMain(taskID string) error {
 	// Serialize merge operations to prevent git index lock conflicts
 	mergeMutex.Lock()
 	defer mergeMutex.Unlock()
@@ -256,6 +284,11 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 		// Branch doesn't exist, nothing to merge
 		// This can happen if the worktree was never created or was cleaned up
 		return nil
+	}
+
+	if !branchExists(wm.baseDir, mainBranch) {
+		return fmt.Errorf("cannot merge %s: %w in %s; drover merges task branches into 'main' (branch %s was kept)",
+			taskID, ErrNoMainBranch, wm.baseDir, branchName)
 	}
 
 	// Check if worktree has any commits ahead of main
@@ -282,6 +315,12 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 	cmd = exec.Command("git", "merge", "--no-ff", branchName, "-m", fmt.Sprintf("drover: Merge %s", taskID))
 	cmd.Dir = wm.baseDir
 	if output, err := cmd.CombinedOutput(); err != nil {
+		if strings.Contains(string(output), "refusing to merge unrelated histories") {
+			// Never "fix" this with reset --hard: that would discard main's
+			// history. Leave both branches intact and let a human decide.
+			return fmt.Errorf("cannot merge %s: %w; branch %s was kept and main is unchanged",
+				taskID, ErrUnrelatedHistories, branchName)
+		}
 		return fmt.Errorf("merging: %w\n%s", err, output)
 	}
 

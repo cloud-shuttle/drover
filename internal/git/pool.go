@@ -562,6 +562,11 @@ func (p *WorktreePool) createAndWarmWorktree(taskID string) error {
 		return fmt.Errorf("creating worktree directory: %w", err)
 	}
 
+	// Empty repositories need a root commit on main before branching
+	if _, err := p.manager.EnsureMainBranch(); err != nil {
+		return fmt.Errorf("preparing empty repository: %w", err)
+	}
+
 	// Clean up any existing worktree
 	p.manager.cleanUpWorktree(taskID)
 
@@ -614,6 +619,15 @@ func (p *WorktreePool) warmupWorktree(ctx context.Context, wt *PooledWorktree) {
 	// Ensure directory exists
 	if err := os.MkdirAll(p.manager.worktreeDir, 0755); err != nil {
 		log.Printf("❌ Failed to create worktree directory for %s: %v", wt.ID, err)
+		wt.mu.Lock()
+		wt.State = StateDraining
+		wt.mu.Unlock()
+		return
+	}
+
+	// Empty repositories need a root commit on main before branching
+	if _, err := p.manager.EnsureMainBranch(); err != nil {
+		log.Printf("❌ Failed to prepare empty repository for %s: %v", wt.ID, err)
 		wt.mu.Lock()
 		wt.State = StateDraining
 		wt.mu.Unlock()
