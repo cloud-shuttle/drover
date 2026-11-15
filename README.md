@@ -108,8 +108,8 @@ export DROVER_DATABASE_URL="postgresql://localhost/drover"
 export DROVER_DATABASE_URL="sqlite:///.drover.db"
 
 # Agent selection (default: claude)
-export DROVER_AGENT_TYPE="claude"  # Options: claude, codex, amp, opencode
-export DROVER_AGENT_PATH="/path/to/agent"  # Optional: custom agent binary path
+export DROVER_AGENT_TYPE="claude"  # Options: claude, codex, amp, opencode, drovercode
+export DROVER_AGENT_PATH="/path/to/agent"  # Optional: defaults to the binary for the agent type
 ```
 
 ### Agent Types
@@ -122,7 +122,7 @@ Drover supports multiple AI coding agents through a pluggable interface:
 | **Codex** | `codex` | OpenAI's Codex agent |
 | **Amp** | `amp` | Amp AI agent |
 | **OpenCode** | `opencode` | OpenCode CLI by Anomaly |
-| **Drover Code** | `drover-code` | Cloud Shuttle's native TUI agent |
+| **Drover Code** | `drovercode` (alias `drover-code`) | Cloud Shuttle's native agent, run headless (binary `drover-code`) |
 
 ```bash
 # Use Codex instead of Claude
@@ -134,9 +134,12 @@ export DROVER_AGENT_TYPE="amp"
 export DROVER_AGENT_PATH="/usr/local/bin/amp"
 drover run
 
-# Use OpenCode
+# Use OpenCode (runs `opencode` unless DROVER_AGENT_PATH is set)
 export DROVER_AGENT_TYPE="opencode"
-export DROVER_AGENT_PATH="/usr/local/bin/opencode"
+drover run
+
+# Use Drover Code locally (runs `drover-code`)
+export DROVER_AGENT_TYPE="drovercode"
 drover run
 ```
 

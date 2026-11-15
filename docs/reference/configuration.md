@@ -27,8 +27,8 @@ For CLI flags on `drover run`, see [CLI reference](cli.md).
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
 | `DROVER_WORKERS` | no | `3` | Default parallel workers (overridden by `drover run -w`) |
-| `DROVER_AGENT_TYPE` | no | `claude` | Agent backend: `claude`, `codex`, `amp`, `opencode`, `worker` |
-| `DROVER_AGENT_PATH` | no | per type | Path to agent CLI binary |
+| `DROVER_AGENT_TYPE` | no | `claude` | Agent backend: `claude`, `codex`, `amp`, `opencode`, `drovercode` (alias `drover-code`), `worker` |
+| `DROVER_AGENT_PATH` | no | per type | Path to agent CLI binary (defaults: `claude`, `codex`, `amp`, `opencode`, `drover-code`) |
 | `DROVER_CLAUDE_PATH` | no | — | Deprecated alias for `DROVER_AGENT_PATH` |
 | `DROVER_TASK_TIMEOUT` | no | `60m` | Max time per task execution |
 | `DROVER_USE_WORKER_SUBPROCESS` | no | `false` | Run agents inside `drover-worker` subprocess |
