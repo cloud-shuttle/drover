@@ -49,6 +49,12 @@ func (wm *WorktreeManager) Create(task *types.Task) (string, error) {
 		return "", fmt.Errorf("creating worktree directory: %w", err)
 	}
 
+	// Empty repositories have nothing to branch from; give them a root
+	// commit on main first so task branches share history with main.
+	if _, err := wm.EnsureMainBranch(); err != nil {
+		return "", fmt.Errorf("preparing empty repository: %w", err)
+	}
+
 	// Clean up any existing worktree/branch at this path first
 	// This handles stale worktrees from interrupted runs
 	wm.cleanUpWorktree(task.ID)
@@ -258,6 +264,11 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 		return nil
 	}
 
+	if !branchExists(wm.baseDir, mainBranch) {
+		return fmt.Errorf("cannot merge %s: %w in %s; drover merges task branches into 'main' (branch %s was kept)",
+			taskID, ErrNoMainBranch, wm.baseDir, branchName)
+	}
+
 	// Check if worktree has any commits ahead of main
 	cmd = exec.Command("git", "rev-list", "main.."+branchName, "--count")
 	cmd.Dir = wm.baseDir
@@ -282,6 +293,12 @@ func (wm *WorktreeManager) MergeToMain(taskID string) error {
 	cmd = exec.Command("git", "merge", "--no-ff", branchName, "-m", fmt.Sprintf("drover: Merge %s", taskID))
 	cmd.Dir = wm.baseDir
 	if output, err := cmd.CombinedOutput(); err != nil {
+		if strings.Contains(string(output), "refusing to merge unrelated histories") {
+			// Never "fix" this with reset --hard: that would discard main's
+			// history. Leave both branches intact and let a human decide.
+			return fmt.Errorf("cannot merge %s: %w; branch %s was kept and main is unchanged",
+				taskID, ErrUnrelatedHistories, branchName)
+		}
 		return fmt.Errorf("merging: %w\n%s", err, output)
 	}
 
