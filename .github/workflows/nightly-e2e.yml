@@ -38,7 +38,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          # Matches drover's go.mod minimum (go 1.26.0); check-latest picks up
+          # the newest 1.26.x patch release. Repos that need a newer Go still
+          # get it via their own go/toolchain directive (GOTOOLCHAIN=auto).
+          go-version: '1.26'
           check-latest: true
 
       - name: Cache Go modules
