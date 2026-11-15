@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -9,6 +10,9 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/cloud-shuttle/drover/pkg/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // mainBranch is the branch drover merges task branches into.
@@ -75,6 +79,23 @@ func repoHasCommits(dir string) bool {
 // even when there is no "main" branch. It never resets, rewrites or deletes
 // existing history. It returns true when it created the initial commit.
 func (wm *WorktreeManager) EnsureMainBranch() (bool, error) {
+	return wm.EnsureMainBranchContext(context.Background())
+}
+
+// EnsureMainBranchContext is EnsureMainBranch with a parent context for
+// tracing. It records a drover.git.ensure_main span.
+func (wm *WorktreeManager) EnsureMainBranchContext(ctx context.Context) (created bool, err error) {
+	_, span := telemetry.StartGitSpan(ctx, telemetry.SpanGitEnsureMain,
+		attribute.String(telemetry.KeyGitBranch, mainBranch))
+	defer func() {
+		span.SetAttributes(attribute.Bool(telemetry.KeyGitCreatedInitCommit, created))
+		telemetry.RecordErrorWithStatus(span, err, "git", "ensure_main")
+		span.End()
+	}()
+	return wm.ensureMainBranch()
+}
+
+func (wm *WorktreeManager) ensureMainBranch() (bool, error) {
 	initMutex.Lock()
 	defer initMutex.Unlock()
 
