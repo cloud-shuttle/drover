@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/cloud-shuttle/drover/internal/config"
 	ctxmngr "github.com/cloud-shuttle/drover/internal/context"
 	"github.com/cloud-shuttle/drover/pkg/types"
 	"go.opentelemetry.io/otel/trace"
@@ -33,10 +34,12 @@ type Agent interface {
 
 // AgentConfig contains configuration for creating an agent
 type AgentConfig struct {
-	// Type is the agent type: "claude", "codex", "amp", "opencode", or "worker"
+	// Type is the agent type: "claude", "codex", "amp", "opencode", "drovercode"
+	// (alias "drover-code"), or "worker"
 	Type string
 
-	// Path is the path to the agent binary (for claude/codex/amp CLIs)
+	// Path is the path to the agent binary. Empty (or the "claude" default with
+	// another type selected) resolves to the type's default binary.
 	Path string
 
 	// Timeout is the maximum duration to wait for task completion
@@ -62,7 +65,12 @@ type AgentConfig struct {
 func NewAgent(cfg *AgentConfig) (Agent, error) {
 	var agent Agent
 
-	switch cfg.Type {
+	agentType := config.NormalizeAgentType(cfg.Type)
+	// Resolve the binary for the selected type so a leftover "claude"
+	// default path never runs Claude for another agent type.
+	path := config.ResolveAgentPath(agentType, cfg.Path)
+
+	switch agentType {
 	case "worker":
 		// Use drover-worker subprocess for process isolation
 		workerPath := cfg.WorkerBinary
@@ -74,14 +82,16 @@ func NewAgent(cfg *AgentConfig) (Agent, error) {
 		if wa, ok := agent.(*WorkerAgent); ok && cfg.WorkerMemoryLimit != "" {
 			wa.SetMemoryLimit(cfg.WorkerMemoryLimit)
 		}
-	case "claude":
-		agent = NewClaudeAgent(cfg.Path, cfg.Timeout)
-	case "codex":
-		agent = NewCodexAgent(cfg.Path, cfg.Timeout)
-	case "amp":
-		agent = NewAmpAgent(cfg.Path, cfg.Timeout)
-	case "opencode":
-		agent = NewOpenCodeAgent(cfg.Path, cfg.Timeout)
+	case config.AgentClaude:
+		agent = NewClaudeAgent(path, cfg.Timeout)
+	case config.AgentCodex:
+		agent = NewCodexAgent(path, cfg.Timeout)
+	case config.AgentAmp:
+		agent = NewAmpAgent(path, cfg.Timeout)
+	case config.AgentOpenCode:
+		agent = NewOpenCodeAgent(path, cfg.Timeout)
+	case config.AgentDroverCode:
+		agent = NewDroverCodeAgent(path, cfg.Timeout)
 	default:
 		// Default to Claude for backwards compatibility
 		agent = NewClaudeAgent(cfg.Path, cfg.Timeout)

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/cloud-shuttle/drover/internal/config"
 )
 
 // Config holds per-project Drover configuration
@@ -202,14 +204,8 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate agent type
-	validAgents := map[string]bool{
-		"claude":  true,
-		"codex":   true,
-		"amp":     true,
-		"opencode": true,
-	}
-	if c.Agent != "" && !validAgents[c.Agent] {
-		return fmt.Errorf("unknown agent type: %s (valid: claude, codex, amp, opencode)", c.Agent)
+	if c.Agent != "" && !config.IsKnownAgentType(c.Agent) {
+		return fmt.Errorf("unknown agent type: %s (valid: %s)", c.Agent, strings.Join(config.KnownAgentTypes(), ", "))
 	}
 
 	return nil

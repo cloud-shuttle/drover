@@ -23,9 +23,12 @@ This path is **self-hosted** — not [Drover Cloud hosted agent jobs](../../../d
 | `codex` | `codex` | OpenAI Codex agent |
 | `amp` | `amp` | Amp agent |
 | `opencode` | `opencode` | OpenCode CLI |
+| `drovercode` (alias `drover-code`) | `drover-code` | Cloud Shuttle's Drover Code, run headless (prompt on stdin, `DROVER_CODE_HEADLESS=1`) |
 | `worker` | inner agent via `DROVER_AGENT_PATH` | Runs the real agent inside a **`drover-worker`** subprocess for OOM isolation |
 
-The factory in `internal/executor/agent.go` wires these types. A **`drover-code`** executor exists in the repo but is **not** selected by `DROVER_AGENT_TYPE` today — use Cloud [hosted agent jobs](../../../drover-cloud/docs/how-to/configure-gateway-hosted-agents.md) for headless Drover Code, or contribute wiring for local `drover-code`.
+The factory in `internal/executor/agent.go` wires these types. If `DROVER_AGENT_PATH` is not set, Drover runs the binary in the second column for the selected type (for example `opencode`), not `claude`.
+
+For **Drover Code**, Drover passes the prompt on stdin and writes the structured result to a temporary file outside the worktree (`DROVER_CODE_RESULT_PATH`). Session events go to `.drover/session-events.jsonl` in the worktree, which Drover keeps out of the task's commit. `DROVER_CODE_PERMISSION_PRESET` and the `ANTHROPIC_*` variables are passed through from your environment. For hosted, remote runs use Cloud [hosted agent jobs](../../../drover-cloud/docs/how-to/configure-gateway-hosted-agents.md) instead.
 
 ## Quick setup (Claude Code)
 
@@ -53,9 +56,11 @@ export DROVER_AGENT_PATH=codex
 export DROVER_AGENT_TYPE=amp
 export DROVER_AGENT_PATH=/usr/local/bin/amp
 
-# OpenCode
+# OpenCode (DROVER_AGENT_PATH defaults to `opencode`)
 export DROVER_AGENT_TYPE=opencode
-export DROVER_AGENT_PATH=opencode
+
+# Drover Code, run locally (DROVER_AGENT_PATH defaults to `drover-code`)
+export DROVER_AGENT_TYPE=drovercode
 
 drover run --workers 4
 ```
