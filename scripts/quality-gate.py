@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Canonical copy: https://github.com/cloud-shuttle/home/blob/main/scripts/quality-gate.py
+# This in-repo copy is kept so CI can run without checking out the Home Repo.
+# Per-repo extra ignore paths stay in this file (local overlay).
 import sys
 import os
 import re
