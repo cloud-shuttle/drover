@@ -6,6 +6,9 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch: # Allow manual triggering for verification
 
+permissions:
+  contents: read
+
 jobs:
   ecosystem-smoke-test:
     name: Nightly E2E Smoke Test (${{ matrix.repository }})
