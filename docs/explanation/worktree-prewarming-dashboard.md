@@ -636,8 +636,8 @@ Based on learnings from phases 1-3:
 ## Appendix A: Related Documents
 
 - [Drover README.md](../README.md) - User documentation
-- [Drover DESIGN.md](./DESIGN.md) - Core architecture
-- [OTel Integration Design](../scripts/telemetry/README.md) - Observability foundation
+- [Drover design](design.md) - Core architecture
+- [OTel Integration Design](../../spec/opentelemetry.md) - Observability foundation
 - [Ramp Inspect Blog Post](https://builders.ramp.com/post/why-we-built-our-background-agent) - Inspiration source
 
 ---

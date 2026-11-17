@@ -1,5 +1,13 @@
 # 🐂 Drover
 
+![Status: active](https://img.shields.io/badge/status-active-2ea44f)
+
+> **Status, checked 18 Nov 2026: ACTIVE.** Public parallel coordinator. Last code change 15 Nov 2026 (per-type agent binaries, Drover Code wired in). Already ships `pkg/telemetry` (OpenTelemetry) and `internal/sessionevent`, both of which the M1 trace spine promotes into drover-libs.
+>
+> **Clean-clone check:** `go build ./...` and `go test -short ./...` pass (Go 1.26).
+>
+> **Roadmap:** [ROADMAP.md](ROADMAP.md). Program tracking: Drover gap program (M0 to M4).
+
 **Drive your project to completion with parallel AI agents.**
 
 ![Drover](images/drover.png)
@@ -58,7 +66,7 @@ drover run --epic epic-a1b2
 
 ### Prerequisites
 
-- Go 1.22+ (currently targets Go 1.25)
+- Go 1.26 (`go.mod` says 1.26.0)
 - Git
 - An AI coding agent installed and authenticated (Claude Code, Codex, Amp, OpenCode, or Drover Code)
 - PostgreSQL (production) or SQLite (local dev, default)
@@ -396,11 +404,11 @@ Drover is built on a pure Go stack:
 
 **Documentation:**
 - [Documentation hub](./docs/README.md) - Diátaxis documentation index
-- [Design Docs](./design/DESIGN.md) - Detailed architecture documentation
+- [Design Docs](docs/explanation/design.md) - Detailed architecture documentation
 - [Spec Directory](./spec/) - Feature specifications
 - [Contributing](./CONTRIBUTING.md) - Contribution guidelines
 
-New pages under `docs/` require YAML frontmatter per the org [content taxonomy](../docs/taxonomy.yaml); validate with [`scripts/validate-content-frontmatter.sh`](scripts/validate-content-frontmatter.sh).
+New pages under `docs/` require YAML frontmatter per the org [content taxonomy](taxonomy/taxonomy.yaml); validate with [`scripts/validate-content-frontmatter.sh`](scripts/validate-content-frontmatter.sh).
 
 ## Comparison
 
