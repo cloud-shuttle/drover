@@ -3,7 +3,7 @@ package executor
 import (
 	"testing"
 
-	"github.com/cloud-shuttle/drover/internal/sessionevent"
+	"github.com/cloud-shuttle/drover-libs/pkg/sessionevent"
 	"github.com/cloud-shuttle/drover/pkg/types"
 )
 

@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloud-shuttle/drover-libs/pkg/sessionevent"
 	ctxmngr "github.com/cloud-shuttle/drover/internal/context"
-	"github.com/cloud-shuttle/drover/internal/sessionevent"
 	"github.com/cloud-shuttle/drover/internal/taskcontext"
 	"github.com/cloud-shuttle/drover/pkg/telemetry"
 	"github.com/cloud-shuttle/drover/pkg/types"
