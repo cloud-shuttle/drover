@@ -355,9 +355,9 @@ git checkout -b feat/v030-revised origin/main
 ## 📎 Document Links
 
 - [REVIEW_INDEX.md](REVIEW_INDEX.md) - Start here
-- [EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md) - 5 min read
+- EXECUTIVE_SUMMARY.md (file not in repo) - 5 min read
 - [COMPREHENSIVE_REVIEW_V030.md](COMPREHENSIVE_REVIEW_V030.md) - Full review
-- [TESTING_CHECKLIST.md](TESTING_CHECKLIST.md) - E2E tests
+- [TESTING_CHECKLIST.md](../testing/TESTING_CHECKLIST.md) - E2E tests
 
 ---
 

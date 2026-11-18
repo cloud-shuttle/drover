@@ -12,7 +12,7 @@ surface: repo-docs
 
 **Navigation:**
 - [Documentation hub](../README.md) - Diátaxis documentation index
-- [Design Overview](./DESIGN.md) - Comprehensive design document
+- [Design Overview](design.md) - Comprehensive design document
 - [Architecture Diagrams](./architecture.md) - System architecture
 - [Sequence Diagrams](./sequence.md) - Runtime flow
 

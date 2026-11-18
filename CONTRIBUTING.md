@@ -3,7 +3,7 @@
 **Navigation:**
 - [Documentation hub](./docs/README.md) - Diátaxis documentation index
 - [Feature Specifications](./spec/) - Detailed feature specifications
-- [Design Documents](./design/) - Architecture and design decisions
+- [Design Documents](docs/explanation/design.md) - Architecture and design decisions
 
 ---
 

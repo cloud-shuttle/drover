@@ -73,6 +73,6 @@ Not part of the public Diátaxis quadrants:
 
 - [Project overview](../README.md) — install, quick start, command cheat sheet
 - [Domain glossary](../CONTEXT.md)
-- [Org backlog](../../docs/TASKS.md)
+- Org backlog (local Drover workspace file, not in Git)
 
-New pages under `docs/` require YAML frontmatter per the org [content taxonomy](../../docs/taxonomy.yaml); validate with [`scripts/validate-content-frontmatter.sh`](../scripts/validate-content-frontmatter.sh).
+New pages under `docs/` require YAML frontmatter per the org [content taxonomy](../taxonomy/taxonomy.yaml); validate with [`scripts/validate-content-frontmatter.sh`](../scripts/validate-content-frontmatter.sh).

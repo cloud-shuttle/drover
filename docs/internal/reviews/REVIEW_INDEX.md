@@ -67,13 +67,13 @@ Complete testing checklist with:
 ### If you want to...
 
 **Make a quick decision:**
-→ Read [EXECUTIVE_SUMMARY.md](EXECUTIVE_SUMMARY.md)
+→ Read EXECUTIVE_SUMMARY.md (file not in repo)
 
 **Understand the technical issues:**
 → Read [COMPREHENSIVE_REVIEW_V030.md](COMPREHENSIVE_REVIEW_V030.md)
 
 **Run tests:**
-→ Follow [TESTING_CHECKLIST.md](TESTING_CHECKLIST.md)
+→ Follow [TESTING_CHECKLIST.md](../testing/TESTING_CHECKLIST.md)
 
 **See what features were added:**
 → See [COMPREHENSIVE_REVIEW_V030.md § Feature Analysis](COMPREHENSIVE_REVIEW_V030.md#-feature-analysis)
@@ -82,7 +82,7 @@ Complete testing checklist with:
 → See [COMPREHENSIVE_REVIEW_V030.md § Critical Issues](COMPREHENSIVE_REVIEW_V030.md#-critical-issues)
 
 **Get action items:**
-→ See [EXECUTIVE_SUMMARY.md § Recommended Actions](EXECUTIVE_SUMMARY.md#recommended-actions)
+→ See EXECUTIVE_SUMMARY.md § Recommended Actions (file not in repo)
 
 ---
 
@@ -238,10 +238,10 @@ Complete testing checklist with:
 
 ## 🔗 Related Documents
 
-- [DESIGN.md](design/DESIGN.md) - Drover design principles
-- [README.md](README.md) - Project documentation
+- [design.md](../../explanation/design.md) - Drover design principles
+- [README.md](../../../README.md) - Project documentation
 - [REVIEW.md](REVIEW.md) - Previous review (2026-01-09)
-- [roborev-enhancements.md](design/roborev-enhancements.md) - Planned enhancements
+- [roborev-enhancements.md](../../explanation/roborev-enhancements.md) - Planned enhancements
 
 ---
 

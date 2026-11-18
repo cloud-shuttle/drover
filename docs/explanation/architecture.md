@@ -12,8 +12,8 @@ surface: repo-docs
 
 **Navigation:**
 - [Documentation hub](../README.md) - Diátaxis documentation index
-- [Durable Workflows Spec](../spec/durable-workflows.md) - Workflow engine specification
-- [Design Overview](./DESIGN.md) - Comprehensive design document
+- [Durable Workflows Spec](../../spec/durable-workflows.md) - Workflow engine specification
+- [Design Overview](design.md) - Comprehensive design document
 - [State Machine](./state-machine.md) - Task state transitions
 - [Sequence Diagrams](./sequence.md) - Runtime flow
 
