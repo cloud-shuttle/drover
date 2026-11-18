@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/cloud-shuttle/drover-libs v0.1.1-0.20261117234455-1a4ba2e6aa5a
+	github.com/cloud-shuttle/drover-libs v0.2.0
 	github.com/dbos-inc/dbos-transact-golang v0.14.0
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/google/uuid v1.6.0

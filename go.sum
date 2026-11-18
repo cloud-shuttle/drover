@@ -18,8 +18,8 @@ github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd h1:vy0G
 github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd/go.mod h1:xe0nKWGd3eJgtqZRaN9RjMtK7xUYchjzPr7q6kcvCCs=
 github.com/charmbracelet/x/term v0.2.1 h1:AQeHeLZ1OqSXhrAWpYUtZyX1T3zVxfpZuEQMIQaGIAQ=
 github.com/charmbracelet/x/term v0.2.1/go.mod h1:oQ4enTYFV7QN4m0i9mzHrViD7TQKvNEEkHUMCmsxdUg=
-github.com/cloud-shuttle/drover-libs v0.1.1-0.20261117234455-1a4ba2e6aa5a h1:bXtk+4cKDI9qdQ246cHSfKgv8wTjFvA4WkR52hR+EF4=
-github.com/cloud-shuttle/drover-libs v0.1.1-0.20261117234455-1a4ba2e6aa5a/go.mod h1:ocbNKvp3GEe05vyfh+cvPPFAwdfDbNA+StkD/MeKkbM=
+github.com/cloud-shuttle/drover-libs v0.2.0 h1:kGQTAWz3iFIiSPqDtLQlZ6pPdzlMvGTASbq+Ah+JTD8=
+github.com/cloud-shuttle/drover-libs v0.2.0/go.mod h1:ocbNKvp3GEe05vyfh+cvPPFAwdfDbNA+StkD/MeKkbM=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dbos-inc/dbos-transact-golang v0.14.0 h1:tCybxxTH4t7gOzoDSWJ/aXrvQs+uxR/ExEcReJK8HwQ=
