@@ -1,0 +1,11 @@
+# Gitleaks configuration for drover.
+# Extends the default gitleaks ruleset. Allowlist entries below cover only
+# findings that were triaged as confirmed false positives during the Drover
+# pre-deploy security sweep on 2026-11-18. Do not add real credentials here:
+# rotate the credential and remove it from the code instead.
+title = "drover gitleaks config"
+
+[extend]
+useDefault = true
+
+# No confirmed false positives at the time of the sweep, so no allowlist entries.
