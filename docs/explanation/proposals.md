@@ -556,7 +556,7 @@ Based on learnings from Phases 1-3:
 
 ## Related Documents
 
-- [Design Overview](DESIGN.md) - Core architecture
+- [Design Overview](design.md) - Core architecture
 - [Architecture Diagrams](architecture.md) - System architecture
 - [Documentation hub](../README.md) - Complete documentation index
 

@@ -849,9 +849,9 @@ The `feat/v030` branch contains **good ideas poorly executed**. The core additio
 
 ## 📚 References
 
-- [DESIGN.md](design/DESIGN.md) - Drover design principles
+- [design.md](../../explanation/design.md) - Drover design principles
 - [REVIEW.md](REVIEW.md) - Previous review (2026-01-09)
-- [roborev-enhancements.md](design/roborev-enhancements.md) - Planned enhancements
+- [roborev-enhancements.md](../../explanation/roborev-enhancements.md) - Planned enhancements
 - [DBOS Documentation](https://dbos.dev/) - DBOS principles
 - [Beads Documentation](https://github.com/beads-dev/beads) - Beads format
 

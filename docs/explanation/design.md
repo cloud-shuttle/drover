@@ -14,7 +14,7 @@ surface: repo-docs
 
 **Navigation:**
 - [Documentation hub](../README.md) - Diátaxis documentation index
-- [Feature Specifications](../spec/) - Detailed feature specs
+- [Feature Specifications](../../spec/) - Detailed feature specs
 - [Architecture Diagrams](./architecture.md) - System architecture
 - [State Machine](./state-machine.md) - Task state transitions
 - [Sequence Diagrams](./sequence.md) - Runtime flow diagrams
@@ -495,7 +495,7 @@ Drover uses OpenTelemetry semantic conventions:
 | `drover.agent.type` | string | "claude-code" |
 | `drover.epic.id` | string | Epic identifier |
 
-See [scripts/telemetry/](../scripts/telemetry/) for full documentation.
+See [scripts/telemetry/](../../scripts/telemetry/README.md) for full documentation.
 
 ---
 
