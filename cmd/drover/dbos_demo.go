@@ -47,13 +47,11 @@ Note: This requires PostgreSQL to be running and DBOS_SYSTEM_DATABASE_URL to be 
 				dbURL = "postgres://postgres:postgres@localhost:5432/drover?sslmode=disable"
 			}
 
-			dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{
-				AppName:     "drover-poc",
-				DatabaseURL: dbURL,
-			})
+			dbosCtx, sysPool, err := newDBOSContext(context.Background(), "drover-poc", dbURL)
 			if err != nil {
 				return fmt.Errorf("failed to initialize DBOS: %w", err)
 			}
+			defer sysPool.Close()
 
 			// Create DBOS orchestrator BEFORE launching DBOS (so queues can be registered)
 			// Note: Passing nil for store since this is a demo without a full project

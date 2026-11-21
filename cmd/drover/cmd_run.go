@@ -141,13 +141,12 @@ func runWithDBOS(cmd *cobra.Command, runCfg *config.Config, store *db.Store, pro
 	}
 
 	// Initialize DBOS context
-	dbosCtx, err := dbos.NewDBOSContext(context.Background(), dbos.Config{
-		AppName:     "drover",
-		DatabaseURL: dbosURL,
-	})
+	// Capped direct system pool (see dbosOptions), closed after Shutdown.
+	dbosCtx, sysPool, err := newDBOSContext(context.Background(), "drover", dbosURL)
 	if err != nil {
 		return fmt.Errorf("initializing DBOS: %w", err)
 	}
+	defer sysPool.Close()
 
 	// Create DBOS orchestrator (this creates the queue before Launch)
 	orch, err := workflow.NewDBOSOrchestrator(runCfg, dbosCtx, projectDir, store)
